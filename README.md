@@ -8,11 +8,11 @@ path also supports raw chunks and raw/RLE byte arrays under Kraken,
 Mermaid/Selkie, and Leviathan framing. Both sparse and dense legacy Huffman
 tables are supported for the three-stream and six-stream byte-array layouts,
 including single-symbol fills. Newer Golomb-Rice Huffman tables and their compact
-symbol-range maps are also supported. These are partial codec paths; tANS,
-interleaved multi-arrays, and LZ chunk commands remain unsupported. Sequential
-recursive arrays concatenate up to two ordinary byte arrays and may themselves
-be nested. Packed RLE command buffers may use raw, RLE, recursive, or either
-supported Huffman encoding. Checksummed blocks are explicitly rejected.
+symbol-range maps are also supported. Recursive arrays cover both sequential
+concatenation and entropy-array interleaving. These are partial codec paths;
+tANS and LZ chunk commands remain unsupported. Packed RLE command buffers may
+use raw, RLE, recursive, or either supported Huffman encoding. Checksummed
+blocks are explicitly rejected.
 
 ## Build
 
@@ -81,8 +81,10 @@ Packed command arrays decode into a lazy, reusable 256 KiB entropy workspace;
 their untouched suffix is appended in that arena before the two-ended RLE pass.
 Nested decoders use nonoverlapping arena regions, and inputs exceeding the fixed
 workspace fail before writing. Sequential recursion is limited to 64 nested
-levels so malformed inputs cannot exhaust the call stack. tANS and interleaved
-multi-arrays are explicitly deferred.
+levels so malformed inputs cannot exhaust the call stack. Interleaved recursive
+arrays decode as many as 63 entropy sources, then rebuild their output from
+bounded index, interval-width, and dual-ended variable-bit streams. tANS remains
+explicitly deferred.
 
 The Huffman decoder uses a portable scalar canonical-code table and bounds-checked
 bit readers. It supports sparse symbol lists and dense alternating symbol runs,
@@ -124,8 +126,9 @@ command forms, legacy sparse/dense Huffman tables and stream layouts, 128 KiB
 chunk boundaries, Golomb-Rice tables, sparse symbol-range maps, and decoder
 failure state. Packed-RLE checks cover nested raw, RLE, Huffman, and Huffman6
 arrays plus workspace exhaustion. Recursive checks cover one/two child arrays,
-nested concatenation, use inside packed RLE, exact input/output accounting,
-unsupported children, and the depth limit. `check`
+nested concatenation, direct and interleaved multi-arrays, separate and combined
+interval metadata, malformed streams, use inside packed RLE, exact input/output
+accounting, unsupported children, and the depth limit. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
@@ -186,8 +189,9 @@ byte-array decoding creates one only when a packed RLE path needs it.
 Sequential recursive behavior follows the noninterleaved branch of
 `decode_recursive`: the control byte permits at most two child arrays, each child
 uses the same byte-array decoder, and decoded results are concatenated into the
-exact parent output range. The high-bit multi-array form remains separate because
-it describes entropy-array interleaving rather than simple recursion.
+exact parent output range. The high-bit form follows `decode_multi_array`: it
+decodes entropy arrays into bounded workspace and interleaves intervals into the
+exact parent output range.
 
 The checked-in regression suite uses self-contained constructed vectors and
 does not require that sibling repository.

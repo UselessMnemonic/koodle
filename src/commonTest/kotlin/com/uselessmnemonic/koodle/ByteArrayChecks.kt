@@ -123,9 +123,47 @@ internal fun checkByteArrays() {
     val recursiveLiterals = recursive(listOf(encoded(bytes(42), 150)), 150)
     val recursivePackedRle = encoded(recursiveLiterals + ByteArray(10) { 0xf0.toByte() }, 300)
     verify(recursivePackedRle, packedExpected)
-    rejectsArray<UnsupportedOperationException> {
-        val input = recursive(listOf(recursiveFirst), 40, interleaved = true)
-        decodeByteArray(input, 0, input.size, ByteArray(40), 0, 40)
+    verify(encoded(bytes(0x80) + recursiveFirst, 40, 5), ByteArray(40) { 7 })
+    fun interleaved(
+        combined: Boolean,
+        indexes: ByteArray = bytes(1, 2, 1, 2, 0),
+        widths: ByteArray = bytes(4, 3, 4, 3),
+        bitstream: ByteArray = bytes(0x44, 0xfc),
+    ): ByteArray {
+        val first = encoded(bytes(65), 40)
+        val second = encoded(bytes(66), 30)
+        val indexData = if (combined) {
+            ByteArray(indexes.size) { index ->
+                (((widths.getOrElse(index) { 0 }.toInt() and 15) shl 4) or
+                    (indexes[index].toInt() and 15)).toByte()
+            }
+        } else indexes
+        val control = bitstream.size or if (combined) 0x8000 else 0
+        val payload = bytes(0x82) + first + second + bytes(control and 255, control ushr 8) +
+            raw(indexData) + (if (combined) ByteArray(0) else raw(widths)) + bitstream
+        return encoded(payload, 70, 5)
+    }
+    val interleavedExpected = ByteArray(20) { 65 } + ByteArray(15) { 66 } +
+        ByteArray(20) { 65 } + ByteArray(15) { 66 }
+    verify(interleaved(combined = false), interleavedExpected)
+    verify(interleaved(combined = true), interleavedExpected)
+    for (combined in listOf(false, true)) {
+        rejectsArray<DecompressionException> {
+            val input = interleaved(combined, indexes = bytes(1, 2, 1, 2, 1))
+            decodeByteArray(input, 0, input.size, ByteArray(70), 0, 70)
+        }
+        rejectsArray<DecompressionException> {
+            val input = interleaved(combined, indexes = bytes(1, 3, 1, 2, 0))
+            decodeByteArray(input, 0, input.size, ByteArray(70), 0, 70)
+        }
+        rejectsArray<DecompressionException> {
+            val input = interleaved(combined, bitstream = bytes(0x44))
+            decodeByteArray(input, 0, input.size, ByteArray(70), 0, 70)
+        }
+    }
+    rejectsArray<DecompressionException> {
+        val input = interleaved(combined = false, widths = bytes(17, 3, 4, 3))
+        decodeByteArray(input, 0, input.size, ByteArray(70), 0, 70)
     }
     for (count in listOf(0, 3, 127)) {
         val input = encoded(bytes(count) + ByteArray(5), 40, 5)
@@ -165,6 +203,8 @@ internal fun checkByteArrays() {
         check(decompress(framed(packedFill(2), kind), packedExpected.size).contentEquals(packedExpected))
         check(decompress(framed(sequential, kind), 100)
             .contentEquals(ByteArray(40) { 7 } + ByteArray(60) { 42 }))
+        check(decompress(framed(interleaved(combined = false), kind), 70)
+            .contentEquals(interleavedExpected))
         val input = framed(encoded(bytes(71), 123), kind)
         for (inputChunk in 1..input.size) for (outputChunk in listOf(1, 13, 123)) {
             val decoder = OozDecoder(123)
