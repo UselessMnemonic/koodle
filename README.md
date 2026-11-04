@@ -11,8 +11,8 @@ including single-symbol fills. Newer Golomb-Rice Huffman tables and their compac
 symbol-range maps are also supported. tANS arrays support both legacy and newer
 Golomb-Rice table representations. Recursive arrays cover both sequential
 concatenation and entropy-array interleaving. Kraken LZ chunks support ordinary
-and delta literals, recent and traditional explicit offsets, and extended
-lengths. Scaled Kraken offsets and excess-byte streams remain unsupported.
+and delta literals, recent, traditional, and scaled explicit offsets, and
+extended lengths. Excess-byte streams remain unsupported.
 Mermaid/Selkie LZ chunks support near and far offsets, long commands, delta
 literals, and split 64 KiB command streams. All six Leviathan modes support raw,
 subtractive, laminated, striped, and order-1 literal streams, single or
@@ -139,9 +139,9 @@ interval metadata, malformed streams, use inside packed RLE, exact input/output
 accounting, and the depth limit. tANS checks cover legacy and Golomb-Rice table
 construction, symbol ranges, its five interleaved states, recursive nesting,
 truncation, and all three shared large-quantum framings. Kraken checks cover
-ordinary/delta literals, recent/explicit offsets, overlapping matches, and both
-inline and variable-bit extended lengths. Mermaid checks cover ordinary/delta
-literals, near/far offsets, long commands, and the 64 KiB command split.
+ordinary/delta literals, recent/traditional/scaled offsets, overlapping matches,
+and both inline and variable-bit extended lengths. Mermaid checks cover
+ordinary/delta literals, near/far offsets, long commands, and the 64 KiB command split.
 Leviathan checks cover all six literal modes, single/eight-way command streams,
 recent/traditional/scaled offsets, and extended literal lengths. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
@@ -179,8 +179,9 @@ The shared byte-array layer follows `decode_bytes`, `decode_rle`, and
 `decode_rle_unpacked` in `src/decoder/mod.rs`. The large-quantum adapter follows
 the raw and byte-array branches of `decode_quantum`. Kraken command processing
 follows `KrakenLzTable`, including the traditional two-ended offset/length bit
-stream and forward-expanding match copies. Scaled offsets, excess-byte streams,
-remain deferred. Mermaid/Selkie processing
+stream, scaled offsets with their optional low-byte stream, and forward-expanding
+match copies. Excess-byte streams remain deferred.
+Mermaid/Selkie processing
 follows `MermaidLzTable`, including raw or entropy-coded near offsets, far
 offsets, long lengths, and its two 64 KiB command partitions. All Leviathan modes
 follow `LeviathanLzTable`, including laminated, striped, and order-1 literal

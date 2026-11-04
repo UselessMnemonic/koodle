@@ -63,16 +63,25 @@ private fun readKrakenStreams(
     val (literalsStart, literalsSize) = decode(outputSize)
     val (commandsStart, commandsSize) = decode(outputSize)
     if (end - source < 3) throw DecompressionException("Truncated Kraken offset stream")
-    if (input[source].toInt() and 0x80 != 0) {
-        throw UnsupportedOperationException("Scaled Kraken offsets are not supported yet")
-    }
+    val offsetScale = if (input[source].toInt() and 0x80 != 0) {
+        (input[source++].toInt() and 255) - 127
+    } else 0
     val (packedOffsetsStart, packedOffsetsSize) = decode(commandsSize)
+    val offsetLowBitsStart = if (offsetScale > 1) {
+        val (lowBitsStart, lowBitsSize) = decode(packedOffsetsSize)
+        if (lowBitsSize != packedOffsetsSize) {
+            throw DecompressionException("Kraken scaled offset streams have different sizes")
+        }
+        lowBitsStart
+    } else {
+        -1
+    }
     val (packedLengthsStart, packedLengthsSize) = decode(outputSize ushr 2)
 
     val unpacked = unpackOffsets(
         workspace.bytes,
         packedOffsetsStart, packedOffsetsSize,
-        offsetLowBitsStart = -1, offsetScale = 0,
+        offsetLowBitsStart, offsetScale,
         packedLengthsStart, packedLengthsSize,
         input, source, end, "Kraken",
     )

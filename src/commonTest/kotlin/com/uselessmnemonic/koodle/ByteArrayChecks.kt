@@ -214,9 +214,13 @@ internal fun checkByteArrays() {
         offsets: ByteArray = raw(ByteArray(0)),
         lengths: ByteArray = raw(ByteArray(0)),
         variableBits: ByteArray = bytes(0x80),
+        offsetScale: Int? = null,
+        offsetLowBits: ByteArray = ByteArray(0),
     ): ByteArray {
         val prefix = ByteArray(8) { (it + 1).toByte() }
-        val payload = prefix + literals + commands + offsets + lengths + variableBits
+        val scale = offsetScale?.let { bytes(it + 127) } ?: ByteArray(0)
+        val payload = prefix + literals + commands + scale + offsets + offsetLowBits +
+            lengths + variableBits
         return be(0x800000L or (mode.toLong() shl 19) or payload.size.toLong(), 3) + payload
     }
     fun mermaidChunk(
@@ -306,6 +310,27 @@ internal fun checkByteArrays() {
             krakenChunk(
                 1, encoded(bytes(42), 88), commands = raw(bytes(0xc8)),
                 offsets = raw(bytes(0)), variableBits = bytes(0, 0x80),
+            ),
+            6,
+        ),
+        100,
+    ).contentEquals(recentExpected))
+    check(decompress(
+        framed(
+            krakenChunk(
+                1, encoded(bytes(42), 88), commands = raw(bytes(0xc8)),
+                offsets = raw(bytes(8)), variableBits = bytes(0, 0x80), offsetScale = 1,
+            ),
+            6,
+        ),
+        100,
+    ).contentEquals(recentExpected))
+    check(decompress(
+        framed(
+            krakenChunk(
+                1, encoded(bytes(42), 88), commands = raw(bytes(0xc8)),
+                offsets = raw(bytes(0)), offsetScale = 2,
+                offsetLowBits = raw(bytes(8)),
             ),
             6,
         ),
