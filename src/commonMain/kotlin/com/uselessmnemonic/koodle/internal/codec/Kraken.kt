@@ -6,63 +6,6 @@ import com.uselessmnemonic.koodle.internal.entropy.EntropyWorkspace
 import com.uselessmnemonic.koodle.internal.entropy.decodeByteArray
 import com.uselessmnemonic.koodle.internal.entropy.readByteArrayHeader
 
-private class KrakenVarBits(
-    private val source: ByteArray,
-    private val start: Int,
-    private val end: Int,
-) {
-    private var forward = 0
-    private var backward = 0
-
-    fun forward(count: Int): Int = read(count, backwards = false)
-    fun backward(count: Int): Int = read(count, backwards = true)
-
-    private fun read(count: Int, backwards: Boolean): Int {
-        if (count < 0 || forward + backward > (end - start) * 8 - count) {
-            throw DecompressionException("Kraken variable-bit streams overlap")
-        }
-        var value = 0
-        repeat(count) {
-            val position = if (backwards) backward++ else forward++
-            val index = if (backwards) end - 1 - position / 8 else start + position / 8
-            value = (value shl 1) or ((source[index].toInt() ushr (7 - position % 8)) and 1)
-        }
-        return value
-    }
-
-    fun backwardGamma(): Int {
-        var zeros = 0
-        while (backward(1) == 0) {
-            if (++zeros > 12) throw DecompressionException("Invalid Kraken length count")
-        }
-        return ((1 shl zeros) or backward(zeros)) - 1
-    }
-
-    fun distance(code: Int, backwards: Boolean): Int {
-        val width = if (code < 0xf0) (code ushr 4) + 4 else code - 0xf0 + 4
-        val low = if (backwards) backward(width) else forward(width)
-        val value = (1 shl width) or low
-        if (code < 0xf0) return value * 16 + (code and 15) - 248
-        val tail = if (backwards) backward(12) else forward(12)
-        return 8_322_816 + value * 4096 + tail
-    }
-
-    fun length(backwards: Boolean): Int {
-        var zeros = 0
-        while ((if (backwards) backward(1) else forward(1)) == 0) {
-            if (++zeros > 12) throw DecompressionException("Invalid Kraken extended length")
-        }
-        val tail = if (backwards) backward(zeros + 6) else forward(zeros + 6)
-        return (1 shl (zeros + 6)) + tail - 64
-    }
-
-    fun requireConsumed() {
-        if ((forward + 7) / 8 + (backward + 7) / 8 != end - start) {
-            throw DecompressionException("Unused Kraken variable-bit bytes")
-        }
-    }
-}
-
 private data class KrakenStreams(
     val literalsStart: Int,
     val literalsSize: Int,
@@ -126,29 +69,17 @@ private fun readKrakenStreams(
     val (packedOffsetsStart, packedOffsetsSize) = decode(commandsSize)
     val (packedLengthsStart, packedLengthsSize) = decode(outputSize ushr 2)
 
-    val bits = KrakenVarBits(input, source, end)
-    val extendedLengthCount = bits.backwardGamma()
-    if (extendedLengthCount > 512) throw DecompressionException("Too many Kraken extended lengths")
-    val offsets = IntArray(packedOffsetsSize)
-    repeat(packedOffsetsSize) { index ->
-        val code = workspace.bytes[packedOffsetsStart + index].toInt() and 255
-        offsets[index] = -bits.distance(code, backwards = index and 1 != 0)
-    }
-    val extended = IntArray(extendedLengthCount)
-    repeat(extendedLengthCount) { index -> extended[index] = bits.length(index and 1 != 0) }
-    val lengths = IntArray(packedLengthsSize)
-    var extendedIndex = 0
-    repeat(packedLengthsSize) { index ->
-        var value = workspace.bytes[packedLengthsStart + index].toInt() and 255
-        if (value == 255) {
-            if (extendedIndex >= extended.size) throw DecompressionException("Missing Kraken extended length")
-            value += extended[extendedIndex++]
-        }
-        lengths[index] = value + 3
-    }
-    if (extendedIndex != extended.size) throw DecompressionException("Unused Kraken extended lengths")
-    bits.requireConsumed()
-    return KrakenStreams(literalsStart, literalsSize, commandsStart, commandsSize, offsets, lengths)
+    val unpacked = unpackOffsets(
+        workspace.bytes,
+        packedOffsetsStart, packedOffsetsSize,
+        offsetLowBitsStart = -1, offsetScale = 0,
+        packedLengthsStart, packedLengthsSize,
+        input, source, end, "Kraken",
+    )
+    return KrakenStreams(
+        literalsStart, literalsSize, commandsStart, commandsSize,
+        unpacked.offsets, unpacked.lengths,
+    )
 }
 
 private fun runKrakenCommands(

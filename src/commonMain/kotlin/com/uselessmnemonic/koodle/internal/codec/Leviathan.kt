@@ -7,63 +7,6 @@ import com.uselessmnemonic.koodle.internal.entropy.EntropyWorkspace
 import com.uselessmnemonic.koodle.internal.entropy.decodeByteArray
 import com.uselessmnemonic.koodle.internal.entropy.readByteArrayHeader
 
-private class LeviathanBits(
-    private val source: ByteArray,
-    private val start: Int,
-    private val end: Int,
-) {
-    private var forward = 0
-    private var backward = 0
-
-    private fun read(count: Int, backwards: Boolean): Int {
-        if (count < 0 || forward + backward > (end - start) * 8 - count) {
-            throw DecompressionException("Leviathan variable-bit streams overlap")
-        }
-        var value = 0
-        repeat(count) {
-            val position = if (backwards) backward++ else forward++
-            val index = if (backwards) end - 1 - position / 8 else start + position / 8
-            value = (value shl 1) or ((source[index].toInt() ushr (7 - position % 8)) and 1)
-        }
-        return value
-    }
-
-    fun gammaCount(): Int {
-        var zeros = 0
-        while (read(1, backwards = true) == 0) {
-            if (++zeros > 12) throw DecompressionException("Invalid Leviathan length count")
-        }
-        return ((1 shl zeros) or read(zeros, backwards = true)) - 1
-    }
-
-    fun traditionalDistance(code: Int, backwards: Boolean): Int {
-        val width = if (code < 0xf0) (code ushr 4) + 4 else code - 0xf0 + 4
-        val value = (1 shl width) or read(width, backwards)
-        if (code < 0xf0) return value * 16 + (code and 15) - 248
-        return 8_322_816 + value * 4096 + read(12, backwards)
-    }
-
-    fun scaledDistance(code: Int, backwards: Boolean): Int {
-        val width = code ushr 3
-        if (width > 26) throw DecompressionException("Invalid Leviathan scaled offset")
-        return ((8 + (code and 7)) shl width) or read(width, backwards)
-    }
-
-    fun extendedLength(backwards: Boolean): Int {
-        var zeros = 0
-        while (read(1, backwards) == 0) {
-            if (++zeros > 12) throw DecompressionException("Invalid Leviathan extended length")
-        }
-        return (1 shl (zeros + 6)) + read(zeros + 6, backwards) - 64
-    }
-
-    fun requireConsumed() {
-        if ((forward + 7) / 8 + (backward + 7) / 8 != end - start) {
-            throw DecompressionException("Unused Leviathan variable-bit bytes")
-        }
-    }
-}
-
 private data class LeviathanStreams(
     val literalsStart: Int,
     val literalsSize: Int,
@@ -149,37 +92,17 @@ private fun readLeviathanStreams(
     }
     val (commandStart, commandCount) = decode(outputSize, "command")
 
-    val bits = LeviathanBits(input, source, end)
-    val extendedCount = bits.gammaCount()
-    if (extendedCount > 512) throw DecompressionException("Too many Leviathan extended lengths")
-    val offsets = IntArray(offsetCount)
-    repeat(offsetCount) { index ->
-        val code = workspace.bytes[offsetStart + index].toInt() and 255
-        offsets[index] = if (scaling == 0) {
-            -bits.traditionalDistance(code, index and 1 != 0)
-        } else {
-            var offset = 8 - bits.scaledDistance(code, index and 1 != 0)
-            if (scaling != 1) {
-                offset = offset * scaling - (workspace.bytes[extraStart + index].toInt() and 255)
-            }
-            offset
-        }
-    }
-    val extended = IntArray(extendedCount)
-    repeat(extendedCount) { index -> extended[index] = bits.extendedLength(index and 1 != 0) }
-    val lengths = IntArray(lengthCount)
-    var extendedIndex = 0
-    repeat(lengthCount) { index ->
-        var value = workspace.bytes[lengthStart + index].toInt() and 255
-        if (value == 255) {
-            if (extendedIndex >= extended.size) throw DecompressionException("Missing Leviathan extended length")
-            value += extended[extendedIndex++]
-        }
-        lengths[index] = value + 3
-    }
-    if (extendedIndex != extended.size) throw DecompressionException("Unused Leviathan extended lengths")
-    bits.requireConsumed()
-    return LeviathanStreams(literalStart, literalCount, commandStart, commandCount, offsets, lengths)
+    val unpacked = unpackOffsets(
+        workspace.bytes,
+        offsetStart, offsetCount,
+        offsetLowBitsStart = extraStart, offsetScale = scaling,
+        lengthStart, lengthCount,
+        input, source, end, "Leviathan",
+    )
+    return LeviathanStreams(
+        literalStart, literalCount, commandStart, commandCount,
+        unpacked.offsets, unpacked.lengths,
+    )
 }
 
 private fun runLeviathanCommands(

@@ -210,6 +210,12 @@ portable bounded cursors over the forward and backward bitstreams. New table
 metadata reuses the same bounded Golomb-Rice and symbol-range semantics as the
 Huffman implementation.
 
+Packed LZ metadata follows the reference `BitReader`/`unpack_offsets` boundary.
+A shared two-ended reader owns cursor movement and overlap checks; small pure
+integer extensions name the implied-high-bit, traditional/scaled distance,
+relative-offset, scale/low-byte, and packed-length transforms. Kraken and
+Leviathan compose those primitives rather than duplicating the bit arithmetic.
+
 Packed RLE behavior follows the scratch-buffer branch of `decode_rle`: a leading
 byte array is decoded into bounded workspace, remaining command bytes are
 appended, and `decode_rle_unpacked` consumes literals from the front and commands
