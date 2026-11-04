@@ -2,9 +2,9 @@
 
 A Kotlin Multiplatform starting point for a port of
 [oozextract](https://github.com/lvlvllvlvllvlvl/oozextract), under
-`com.uselessmnemonic.koodle`. Supports LZB16 compressed quanta, raw blocks, fill
-quanta, whole-match quanta, and uncompressed small quanta. The shared large-quantum
-path also supports raw chunks and all byte-array entropy encodings under Kraken,
+`com.uselessmnemonic.koodle`. Supports LZB16 and stateful LZNA compressed quanta,
+raw blocks, fill quanta, whole-match quanta, and uncompressed small quanta. The
+shared large-quantum path also supports raw chunks and all byte-array entropy encodings under Kraken,
 Mermaid/Selkie, and Leviathan framing. Both sparse and dense legacy Huffman
 tables are supported for the three-stream and six-stream byte-array layouts,
 including single-symbol fills. Newer Golomb-Rice Huffman tables and their compact
@@ -18,8 +18,8 @@ literals, and split 64 KiB command streams. All six Leviathan modes support raw,
 subtractive, laminated, striped, and order-1 literal streams, single or
 multi-array commands, recent offsets, traditional and scaled packed offsets, and
 extended lengths. Packed offsets and lengths may use recursive byte-array
-representations. Packed RLE command buffers may use any supported byte-array encoding.
-Checksummed blocks are explicitly rejected.
+representations. Packed RLE command buffers may use any supported byte-array
+encoding. Checksummed blocks are explicitly rejected.
 
 ## Build
 
@@ -133,8 +133,8 @@ distance encodings, overflow, capacity limits, byte-array header variants, RLE
 command forms, legacy sparse/dense Huffman tables and stream layouts, 128 KiB
 chunk boundaries, Golomb-Rice tables, sparse symbol-range maps, and decoder
 failure state. Packed-RLE checks cover nested raw, RLE, Huffman, and Huffman6
-arrays plus workspace exhaustion. Recursive checks cover one/two child arrays,
-nested concatenation, direct and interleaved multi-arrays, separate and combined
+arrays plus workspace exhaustion. Recursive checks cover the minimum child count,
+many-child arrays, nested concatenation, direct and interleaved multi-arrays, separate and combined
 interval metadata, malformed streams, use inside packed RLE, exact input/output
 accounting, and the depth limit. tANS checks cover legacy and Golomb-Rice table
 construction, symbol ranges, its five interleaved states, recursive nesting,
@@ -144,7 +144,8 @@ and both inline and variable-bit extended lengths. Mermaid checks cover
 ordinary/delta literals, near/far offsets, long commands, and the 64 KiB command split.
 Leviathan checks cover all six literal modes, single/eight-way command streams,
 recent/traditional/scaled offsets, recursive packed metadata, and extended
-literal lengths. `check`
+literal lengths. LZNA checks cover its initial literal and terminal rANS-state
+layout; the local corpus exercises persistent models, match forms, and restarts. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
@@ -165,8 +166,11 @@ use explicit forward-expansion semantics, not a generic bulk-copy shortcut.
 
 The framing behavior follows `src/ooz/mod.rs` in the MIT-licensed oozextract
 reference: `parse_header`, `parse_quantum_header`, `parse_whole_match`,
-`read_sync`, and the raw/fill/match branches of `extract_block`. LZB16 follows `src/algorithm/lzb16.rs` with a bounded
-history ring in place of whole-output indexing. During this port, the local
+`read_sync`, and the raw/fill/match branches of `extract_block`. LZB16 follows
+`src/algorithm/lzb16.rs` with a bounded history ring in place of whole-output
+indexing. LZNA follows `src/algorithm/lzna.rs`, retaining its adaptive probability
+models across 16 KiB quanta and writing the two terminal rANS states into each
+quantum's final eight bytes. During this port, the local
 `lzb16-mixed` (300,000 bytes) and `lzb16-short` (777 bytes) fixtures were decoded
 and compared byte-for-byte against the Rust repository's `verify` files.
 Whole matches expand forward on overlap, consistent with
@@ -191,6 +195,11 @@ representations. Tests for these paths include constructed command vectors. All
 Kraken, Mermaid, Selkie, and Leviathan files in the inspected local corpus—including
 Kraken restart and cross-block history fixtures—decoded byte-for-byte to their
 reference outputs.
+
+All 12 LZNA files in the inspected local corpus decoded byte-for-byte to their
+reference outputs. LZNA uses absolute stream positions for model contexts and
+match references even when a restart replaces its adaptive model; retained match
+bytes remain bounded by `historyCapacity`.
 
 Legacy Huffman behavior follows `decode_bytes_type12`,
 `huff_read_code_lengths_old`, and the scalar semantics of `HuffReader`. During

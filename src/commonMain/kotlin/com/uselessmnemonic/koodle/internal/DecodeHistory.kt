@@ -18,6 +18,7 @@ internal class DecodeHistory(capacity: Int) {
 
     val hasCodecOutput: Boolean get() = codecHasOutput
     val codecOutputCount: Long get() = codecTotal
+    val outputCount: Long get() = total
 
     fun append(value: Byte) {
         bytes[next] = value
@@ -39,6 +40,18 @@ internal class DecodeHistory(capacity: Int) {
         if (distance > bytes.size) {
             throw UnsupportedOperationException(
                 "Codec match distance $distance exceeds history capacity ${bytes.size}; increase historyCapacity",
+            )
+        }
+        return previousWholeMatch(distance)
+    }
+
+    fun previousStream(distance: Int): Byte {
+        if (distance <= 0 || distance.toLong() > total) {
+            throw DecompressionException("Match precedes the stream output")
+        }
+        if (distance > bytes.size) {
+            throw UnsupportedOperationException(
+                "Match distance $distance exceeds history capacity ${bytes.size}; increase historyCapacity",
             )
         }
         return previousWholeMatch(distance)
