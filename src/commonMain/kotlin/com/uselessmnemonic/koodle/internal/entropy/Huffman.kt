@@ -16,6 +16,26 @@ private class HeaderBits(private val source: ByteArray, private val start: Int, 
         }
         return value
     }
+
+    fun readRunLength(): Int {
+        var zeros = 0
+        while (read(1) == 0) {
+            if (++zeros > 7) throw DecompressionException("Huffman symbol run is too large")
+        }
+        val width = zeros + 1
+        return ((1 shl width) or read(width)) - 1
+    }
+
+    fun readLengthDelta(forcedBits: Int): Int {
+        var zeros = 0
+        while (read(1) == 0) {
+            if (++zeros > (20 ushr forcedBits)) {
+                throw DecompressionException("Huffman length delta is too large")
+            }
+        }
+        val value = (zeros shl forcedBits) or read(forcedBits)
+        return if (value and 1 == 0) value ushr 1 else -(value ushr 1) - 1
+    }
 }
 
 /** Payload bits are LSB-first within bytes; the second stream visits bytes backwards. */
@@ -83,25 +103,60 @@ internal fun decodeHuffman(
         if (bits.read(1) != 0) throw DecompressionException("Reserved Huffman table format")
         throw UnsupportedOperationException("New Huffman tables are not supported yet")
     }
-    if (bits.read(1) != 0) throw UnsupportedOperationException("Dense Huffman tables are not supported yet")
-    val count = bits.read(8)
-    if (count == 0) throw DecompressionException("Empty Huffman alphabet")
-    if (count == 1) {
-        output.fill(bits.read(8).toByte(), outputStart, outputEnd)
-        // Matches the reference: the declared payload is consumed, including padding.
-        return
-    }
-    val lengthBits = bits.read(3)
-    if (lengthBits > 4) throw DecompressionException("Invalid Huffman code-length width")
-    val symbols = IntArray(count)
-    val lengths = IntArray(count)
-    val seen = BooleanArray(256)
-    repeat(count) { i ->
-        val symbol = bits.read(8)
-        if (seen[symbol]) throw DecompressionException("Duplicate Huffman symbol")
-        seen[symbol] = true
-        symbols[i] = symbol
-        lengths[i] = bits.read(lengthBits) + 1
+    val dense = bits.read(1) != 0
+    val symbols: IntArray
+    val lengths: IntArray
+    if (dense) {
+        val forcedBits = bits.read(2)
+        var symbol = 0
+        var averageTimesFour = 32
+        val symbolList = mutableListOf<Int>()
+        val lengthList = mutableListOf<Int>()
+        var skipZeros = bits.read(1) != 0
+        while (symbol < 256) {
+            if (skipZeros) {
+                skipZeros = false
+            } else {
+                symbol += bits.readRunLength()
+                if (symbol >= 256) break
+            }
+            var run = bits.readRunLength()
+            if (run <= 0 || run > 256 - symbol) {
+                throw DecompressionException("Invalid Huffman symbol run")
+            }
+            repeat(run) {
+                val length = ((averageTimesFour + 2) ushr 2) + bits.readLengthDelta(forcedBits)
+                if (length !in 1..11) throw DecompressionException("Invalid Huffman code length")
+                symbolList += symbol++
+                lengthList += length
+                averageTimesFour = length + ((3 * averageTimesFour + 2) ushr 2)
+            }
+        }
+        if (symbol != 256 || symbolList.size < 2) {
+            throw DecompressionException("Invalid dense Huffman alphabet")
+        }
+        symbols = symbolList.toIntArray()
+        lengths = lengthList.toIntArray()
+    } else {
+        val count = bits.read(8)
+        if (count == 0) throw DecompressionException("Empty Huffman alphabet")
+        if (count == 1) {
+            output.fill(bits.read(8).toByte(), outputStart, outputEnd)
+            // Matches the reference: the declared payload is consumed, including padding.
+            return
+        }
+        val lengthBits = bits.read(3)
+        if (lengthBits > 4) throw DecompressionException("Invalid Huffman code-length width")
+        symbols = IntArray(count)
+        lengths = IntArray(count)
+        val seen = BooleanArray(256)
+        repeat(count) { i ->
+            val symbol = bits.read(8)
+            if (seen[symbol]) throw DecompressionException("Duplicate Huffman symbol")
+            seen[symbol] = true
+            symbols[i] = symbol
+            lengths[i] = bits.read(lengthBits) + 1
+        }
     }
     val table = HuffmanTable(symbols, lengths)
     val payload = bits.nextByte

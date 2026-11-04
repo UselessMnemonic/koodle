@@ -46,6 +46,41 @@ internal fun checkHuffman() {
         }
         return pack(bits)
     }
+    fun gamma(value: Int): String {
+        val binary = binary(value + 1, 32).trimStart('0')
+        return "0".repeat(binary.length - 2) + binary
+    }
+    fun denseTable(lengths: Map<Int, Int>, forcedBits: Int = 0): ByteArray {
+        require(lengths.size >= 2 && forcedBits in 0..3)
+        var bits = "01" + binary(forcedBits, 2)
+        var symbol = 0
+        var averageTimesFour = 32
+        val first = lengths.keys.min()
+        bits += if (first == 0) "1" else "0" + gamma(first)
+        while (symbol < 256) {
+            if (symbol < first) symbol = first
+            if (!lengths.containsKey(symbol)) {
+                var next = symbol
+                while (next < 256 && !lengths.containsKey(next)) next++
+                bits += gamma(next - symbol)
+                symbol = next
+                if (symbol == 256) break
+            }
+            var end = symbol
+            while (end < 256 && lengths.containsKey(end)) end++
+            bits += gamma(end - symbol)
+            while (symbol < end) {
+                val target = lengths.getValue(symbol++)
+                val delta = target - ((averageTimesFour + 2) ushr 2)
+                val zigzag = if (delta >= 0) delta * 2 else -delta * 2 - 1
+                val quotient = zigzag ushr forcedBits
+                bits += "0".repeat(quotient) + "1"
+                if (forcedBits > 0) bits += binary(zigzag and ((1 shl forcedBits) - 1), forcedBits)
+                averageTimesFour = target + ((3 * averageTimesFour + 2) ushr 2)
+            }
+        }
+        return pack(bits)
+    }
     fun streams(values: List<Int>, codes: Map<Int, String>): ByteArray {
         val parts = (0..2).map { stream ->
             pack(values.filterIndexed { i, _ -> i % 3 == stream }.joinToString("") { codes.getValue(it) }, lsb = true)
@@ -81,16 +116,45 @@ internal fun checkHuffman() {
         val two = List(100) { it % 2 }
         check(decode(payload(two, listOf(0, 1), listOf("0", "1"), six, width = 0), 100, six)
             .contentEquals(two.map { it.toByte() }.toByteArray()))
+        for ((lengthMap, codes) in listOf(
+            mapOf(0 to 1, 1 to 1) to listOf("0", "1"),
+            mapOf(2 to 1, 100 to 2, 200 to 2) to listOf("0", "10", "11"),
+        )) {
+            val denseSymbols = lengthMap.keys.toList()
+            val denseValues = List(257) { denseSymbols[(it * 5 + it / 9) % denseSymbols.size] }
+            val mapping = denseSymbols.zip(codes).toMap()
+            val data = if (!six) streams(denseValues, mapping) else {
+                val half = (denseValues.size + 1) / 2
+                val left = streams(denseValues.take(half), mapping)
+                bytes(left.size and 255, (left.size ushr 8) and 255, left.size ushr 16) +
+                    left + streams(denseValues.drop(half), mapping)
+            }
+            for (forced in 0..3) {
+                check(decode(denseTable(lengthMap, forced) + data, denseValues.size, six)
+                    .contentEquals(denseValues.map { it.toByte() }.toByteArray()))
+            }
+        }
     }
     rejectsHuffman<DecompressionException> { decode(pack("0000000000"), 100) } // empty alphabet
     rejectsHuffman<DecompressionException> { decode(bytes(0xc0, 0), 100) } // reserved format
     rejectsHuffman<UnsupportedOperationException> { decode(bytes(0x80, 0), 100) } // new table
-    rejectsHuffman<UnsupportedOperationException> { decode(bytes(0x40, 0), 100) } // dense table
+    rejectsHuffman<DecompressionException> { decode(bytes(0x40, 0), 100) } // truncated dense table
     rejectsHuffman<DecompressionException> { decode(table(listOf(7, 7), listOf("0", "1")), 100) }
     rejectsHuffman<DecompressionException> { decode(table(listOf(1, 2), listOf("00", "01")), 100) }
     rejectsHuffman<DecompressionException> { decode(table(listOf(1, 2, 3), listOf("0", "1", "0")), 100) }
     rejectsHuffman<DecompressionException> { decode(table(listOf(1, 2), listOf("0".repeat(12), "1")), 100) }
     rejectsHuffman<DecompressionException> { decode(pack("00" + binary(2, 8) + "101"), 100) }
+    rejectsHuffman<DecompressionException> { decode(pack("0100" + gamma(257)), 100) }
+    rejectsHuffman<DecompressionException> { decode(pack("0101" + gamma(257)), 100) }
+    rejectsHuffman<DecompressionException> {
+        decode(denseTable(mapOf(0 to 12, 1 to 1)) + bytes(0, 0, 0), 100)
+    }
+    rejectsHuffman<DecompressionException> {
+        decode(denseTable(mapOf(0 to 2, 1 to 2)) + bytes(0, 0, 0), 100)
+    }
+    rejectsHuffman<DecompressionException> {
+        decode(pack("0101" + gamma(2) + "0".repeat(22) + "1"), 100)
+    }
     val basicTable = table(listOf(65, 66), listOf("0", "1"), width = 0)
     rejectsHuffman<DecompressionException> { decode(basicTable + bytes(255, 255, 0), 100) }
     rejectsHuffman<DecompressionException> { decode(basicTable + bytes(255, 255, 255, 0, 0, 0), 100, true) }

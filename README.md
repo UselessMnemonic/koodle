@@ -5,10 +5,11 @@ A Kotlin Multiplatform starting point for a port of
 `com.uselessmnemonic.koodle`. Supports LZB16 compressed quanta, raw blocks, fill
 quanta, whole-match quanta, and uncompressed small quanta. The shared large-quantum
 path also supports raw chunks and raw/RLE byte arrays under Kraken,
-Mermaid/Selkie, and Leviathan framing. Legacy sparse Huffman tables are supported
-for the three-stream and six-stream byte-array layouts, including single-symbol
-fills. These are partial codec paths; dense/new Huffman tables, tANS, recursive
-arrays, packed RLE commands, and LZ chunk commands remain unsupported.
+Mermaid/Selkie, and Leviathan framing. Both sparse and dense legacy Huffman
+tables are supported for the three-stream and six-stream byte-array layouts,
+including single-symbol fills. These are partial codec paths; newer Golomb-Rice
+Huffman tables, tANS, recursive arrays, packed RLE commands, and LZ chunk
+commands remain unsupported.
 Checksummed blocks are explicitly rejected.
 
 ## Build
@@ -77,10 +78,13 @@ commands, and raw nested command arrays without allocating scratch buffers.
 Other nested command arrays are explicitly deferred.
 
 The Huffman decoder uses a portable scalar canonical-code table and bounds-checked
-bit readers. It supports code lengths through 11 bits and validates complete
-tables, duplicate symbols, stream splits, and stream consumption. The scalar
-implementation is the correctness baseline; platform-specific acceleration can
-be considered after the remaining table formats are ported and benchmarked.
+bit readers. It supports sparse symbol lists and dense alternating symbol runs,
+including gamma-coded run lengths and adaptive code-length deltas with all four
+forced-bit widths. Code lengths through 11 bits are supported. It validates
+complete tables, duplicate symbols, run bounds, stream splits, and stream
+consumption. The scalar implementation is the correctness baseline;
+platform-specific acceleration can be considered after the remaining table
+format is ported and benchmarked.
 
 Whole-match distances may exceed LZB16's 16-bit window. `OozDecoder`,
 `decompress`, and `decompressInto` accept `historyCapacity` in bytes
@@ -107,8 +111,8 @@ fragmented input/output, block and quantum boundaries, mixed fill/raw quanta,
 array ranges, trailing input, truncated and invalid headers, unsupported features,
 LZB16 command forms, overlap expansion, history wraparound/restarts, whole-match
 distance encodings, overflow, capacity limits, byte-array header variants, RLE
-command forms, legacy sparse Huffman tables and stream layouts, 128 KiB chunk
-boundaries, and decoder failure state. `check`
+command forms, legacy sparse/dense Huffman tables and stream layouts, 128 KiB
+chunk boundaries, and decoder failure state. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
