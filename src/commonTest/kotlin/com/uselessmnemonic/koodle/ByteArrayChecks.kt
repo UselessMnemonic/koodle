@@ -129,17 +129,25 @@ internal fun checkByteArrays() {
     val recursiveSecond = encoded(recursiveSecondTable, 60, 2)
     val sequential = recursive(listOf(recursiveFirst, recursiveSecond), 100)
     verify(sequential, ByteArray(40) { 7 } + ByteArray(60) { 42 })
-    val nestedSequential = recursive(listOf(recursive(listOf(recursiveFirst), 40)), 40)
+    val nestedSequential = recursive(
+        listOf(recursive(listOf(recursiveFirst, raw(ByteArray(0))), 40), raw(ByteArray(0))),
+        40,
+    )
     verify(nestedSequential, ByteArray(40) { 7 })
     var tooDeep = encoded(bytes(7), 1000)
-    repeat(65) { tooDeep = recursive(listOf(tooDeep), 1000) }
+    repeat(65) { tooDeep = recursive(listOf(tooDeep, raw(ByteArray(0))), 1000) }
     rejectsArray<DecompressionException> {
         decodeByteArray(tooDeep, 0, tooDeep.size, ByteArray(1000), 0, 1000)
     }
-    val recursiveLiterals = recursive(listOf(encoded(bytes(42), 150)), 150)
+    val recursiveLiterals = recursive(listOf(encoded(bytes(42), 150), raw(ByteArray(0))), 150)
     val recursivePackedRle = encoded(recursiveLiterals + ByteArray(10) { 0xf0.toByte() }, 300)
     verify(recursivePackedRle, packedExpected)
-    verify(encoded(bytes(0x80) + recursiveFirst, 40, 5), ByteArray(40) { 7 })
+    val tooFewInterleavedArrays = encoded(bytes(0x80) + recursiveFirst, 40, 5)
+    rejectsArray<DecompressionException> {
+        decodeByteArray(
+            tooFewInterleavedArrays, 0, tooFewInterleavedArrays.size, ByteArray(40), 0, 40,
+        )
+    }
     fun interleaved(
         combined: Boolean,
         indexes: ByteArray = bytes(1, 2, 1, 2, 0),
@@ -181,23 +189,25 @@ internal fun checkByteArrays() {
         val input = interleaved(combined = false, widths = bytes(17, 3, 4, 3))
         decodeByteArray(input, 0, input.size, ByteArray(70), 0, 70)
     }
-    for (count in listOf(0, 3, 127)) {
+    for (count in listOf(0, 1, 3, 127)) {
         val input = encoded(bytes(count) + ByteArray(5), 40, 5)
         rejectsArray<DecompressionException> {
             decodeByteArray(input, 0, input.size, ByteArray(40), 0, 40)
         }
     }
-    val recursiveUndershoot = recursive(listOf(recursiveFirst), 41)
+    val recursiveUndershoot = recursive(listOf(recursiveFirst, raw(ByteArray(0))), 41)
     rejectsArray<DecompressionException> {
         decodeByteArray(recursiveUndershoot, 0, recursiveUndershoot.size, ByteArray(41), 0, 41)
     }
-    val recursiveTrailing = encoded(bytes(1) + recursiveFirst + bytes(99), 40, 5)
+    val recursiveTrailing = encoded(
+        bytes(2) + recursiveFirst + raw(ByteArray(0)) + bytes(99), 40, 5,
+    )
     rejectsArray<DecompressionException> {
         decodeByteArray(recursiveTrailing, 0, recursiveTrailing.size, ByteArray(40), 0, 40)
     }
-    val recursiveTans = recursive(listOf(legacyTans()), 85)
+    val recursiveTans = recursive(listOf(legacyTans(), raw(ByteArray(0))), 85)
     verify(recursiveTans, tansExpected)
-    val recursiveNewTans = recursive(listOf(newTans()), 85)
+    val recursiveNewTans = recursive(listOf(newTans(), raw(ByteArray(0))), 85)
     verify(recursiveNewTans, tansExpected)
     val tooLargeNested = encoded(bytes(7), 0x40000)
     val workspaceOverflow = encoded(tooLargeNested + bytes(0), 0x40000)
@@ -469,6 +479,30 @@ internal fun checkByteArrays() {
         framed(leviathanChunk(1, encoded(bytes(42), 88), commands = raw(bytes(2))), 12),
         100,
     ).contentEquals(recentExpected))
+    val recursiveOffsets = recursive(listOf(encoded(bytes(0), 20), raw(ByteArray(0))), 20)
+    val recursiveOffsetExpected = ByteArray(48) { krakenPrefix[it and 7] } + ByteArray(52) { 42 }
+    check(decompress(
+        framed(
+            leviathanChunk(
+                1, encoded(bytes(42), 52), commands = raw(ByteArray(20) { 0xe0.toByte() }),
+                offsets = recursiveOffsets, variableBits = ByteArray(10) + bytes(0x80),
+            ),
+            12,
+        ),
+        100,
+    ).contentEquals(recursiveOffsetExpected))
+    val recursiveLengths = recursive(listOf(encoded(bytes(0), 20), raw(ByteArray(0))), 20)
+    val recursiveLengthExpected = ByteArray(188) { krakenPrefix[it and 7] }
+    check(decompress(
+        framed(
+            leviathanChunk(
+                1, raw(ByteArray(0)), commands = raw(ByteArray(20) { 7 }),
+                lengths = recursiveLengths,
+            ),
+            12,
+        ),
+        188,
+    ).contentEquals(recursiveLengthExpected))
     check(decompress(
         framed(
             leviathanChunk(

@@ -17,8 +17,8 @@ Mermaid/Selkie LZ chunks support near and far offsets, long commands, delta
 literals, and split 64 KiB command streams. All six Leviathan modes support raw,
 subtractive, laminated, striped, and order-1 literal streams, single or
 multi-array commands, recent offsets, traditional and scaled packed offsets, and
-extended lengths. Recursive packed offset/length representations remain
-deferred. Packed RLE command buffers may use any supported byte-array encoding.
+extended lengths. Packed offsets and lengths may use recursive byte-array
+representations. Packed RLE command buffers may use any supported byte-array encoding.
 Checksummed blocks are explicitly rejected.
 
 ## Build
@@ -143,7 +143,8 @@ ordinary/delta literals, recent/traditional/scaled offsets, overlapping matches,
 and both inline and variable-bit extended lengths. Mermaid checks cover
 ordinary/delta literals, near/far offsets, long commands, and the 64 KiB command split.
 Leviathan checks cover all six literal modes, single/eight-way command streams,
-recent/traditional/scaled offsets, and extended literal lengths. `check`
+recent/traditional/scaled offsets, recursive packed metadata, and extended
+literal lengths. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
@@ -185,13 +186,11 @@ Mermaid/Selkie processing
 follows `MermaidLzTable`, including raw or entropy-coded near offsets, far
 offsets, long lengths, and its two 64 KiB command partitions. All Leviathan modes
 follow `LeviathanLzTable`, including laminated, striped, and order-1 literal
-selection plus eight-way command streams. Recursive packed offset/length
-representations remain deferred. Tests for
-these paths include constructed command vectors. All Kraken, Mermaid, and Selkie files
-in the inspected local corpus—including Kraken restart and cross-block history
-fixtures—decoded byte-for-byte to their reference outputs. Leviathan remains
-partial: the NCI and X-ray fixtures match their reference output, while recursive
-packed offset/length streams are rejected explicitly.
+selection plus eight-way command streams and recursive packed offset/length
+representations. Tests for these paths include constructed command vectors. All
+Kraken, Mermaid, Selkie, and Leviathan files in the inspected local corpus—including
+Kraken restart and cross-block history fixtures—decoded byte-for-byte to their
+reference outputs.
 
 Legacy Huffman behavior follows `decode_bytes_type12`,
 `huff_read_code_lengths_old`, and the scalar semantics of `HuffReader`. During

@@ -120,6 +120,8 @@ private fun decodeRecursive(
 ) {
     if (end - start < 6) throw DecompressionException("Truncated recursive byte array")
     val control = source[start].toInt() and 255
+    val count = control and 0x7f
+    if (count < 2) throw DecompressionException("Too few recursive byte arrays")
     if (control and 0x80 != 0) {
         decodeInterleaved(
             source, start, end, output, outputStart, outputEnd,
@@ -127,8 +129,6 @@ private fun decodeRecursive(
         )
         return
     }
-    val count = control and 0x7f
-    if (count > 2) throw DecompressionException("Too many sequential byte arrays")
     var input = start + 1
     var written = outputStart
     repeat(count) {

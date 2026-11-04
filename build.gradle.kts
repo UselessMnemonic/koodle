@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -34,4 +35,6 @@ val jvmChecks = tasks.register<JavaExec>("decoderChecks") {
     mainClass.set("com.uselessmnemonic.koodle.DecoderChecksKt")
 }
 
+// Checks are dependency-free executable tests rather than JUnit tests.
+tasks.named<Test>("jvmTest") { enabled = false }
 tasks.named("check") { dependsOn(jvmChecks) }

@@ -2,7 +2,6 @@ package com.uselessmnemonic.koodle.internal.codec
 
 import com.uselessmnemonic.koodle.DecompressionException
 import com.uselessmnemonic.koodle.internal.DecodeHistory
-import com.uselessmnemonic.koodle.internal.entropy.ByteEncoding
 import com.uselessmnemonic.koodle.internal.entropy.EntropyWorkspace
 import com.uselessmnemonic.koodle.internal.entropy.decodeByteArray
 import com.uselessmnemonic.koodle.internal.entropy.decodeMultiArray
@@ -74,23 +73,11 @@ private fun readLeviathanStreams(
     if (input[source].toInt() and 0x80 != 0) {
         scaling = (input[source++].toInt() and 255) - 127
     }
-    if (readByteArrayHeader(input, source, end, outputSize / 3).encoding == ByteEncoding.RECURSIVE) {
-        throw UnsupportedOperationException("Recursive Leviathan packed-offset streams are not supported yet")
-    }
     val (offsetStart, offsetCount) = decode(outputSize / 3, "offset")
     if (scaling != 0 && scaling != 1) {
         val extra = decode(offsetCount, "offset-low")
         if (extra.second != offsetCount) throw DecompressionException("Mismatched Leviathan offset streams")
         extraStart = extra.first
-    }
-    val packedLengthHeader = readByteArrayHeader(input, source, end, outputSize / 5)
-    if (packedLengthHeader.encoding == ByteEncoding.RECURSIVE) {
-        val payload = source + packedLengthHeader.headerSize
-        if (payload >= end) throw DecompressionException("Empty Leviathan packed-length stream")
-        val control = input[payload].toInt() and 255
-        if (control and 0x80 == 0 && control and 0x7f > 2) {
-            throw UnsupportedOperationException("Recursive Leviathan packed-length streams are not supported yet")
-        }
     }
     val (lengthStart, lengthCount) = decode(outputSize / 5, "length")
     val literalArrayCount = when (mode) {
