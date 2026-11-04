@@ -3,6 +3,7 @@ package com.uselessmnemonic.koodle.internal.entropy
 import com.uselessmnemonic.koodle.DecompressionException
 import com.uselessmnemonic.koodle.internal.DecodeHistory
 import com.uselessmnemonic.koodle.internal.codec.decodeKrakenChunk
+import com.uselessmnemonic.koodle.internal.codec.decodeMermaidChunk
 
 /** Shared 128 KiB framing plus dispatch to algorithm-specific LZ command processors. */
 internal fun decodeStoredQuantum(
@@ -29,12 +30,17 @@ internal fun decodeStoredQuantum(
             if (size > inputSize - source) throw DecompressionException("Truncated chunk payload")
             if (size > count) throw DecompressionException("Chunk payload exceeds output size")
             if (size < count) {
-                if (decoderType != 6) {
-                    throw UnsupportedOperationException("LZ commands for decoder $decoderType are not supported yet")
+                when (decoderType) {
+                    6 -> decodeKrakenChunk(
+                        input, source, source + size, output, destination, count, mode, workspace, history,
+                    )
+                    10 -> decodeMermaidChunk(
+                        input, source, source + size, output, destination, count, mode, workspace, history,
+                    )
+                    else -> throw UnsupportedOperationException(
+                        "LZ commands for decoder $decoderType are not supported yet",
+                    )
                 }
-                decodeKrakenChunk(
-                    input, source, source + size, output, destination, count, mode, workspace, history,
-                )
             } else {
                 if (mode != 0) throw DecompressionException("Invalid raw chunk mode")
                 input.copyInto(output, destination, source, source + size)

@@ -12,9 +12,11 @@ symbol-range maps are also supported. tANS arrays support both legacy and newer
 Golomb-Rice table representations. Recursive arrays cover both sequential
 concatenation and entropy-array interleaving. Kraken LZ chunks support ordinary
 and delta literals, recent and traditional explicit offsets, and extended
-lengths. Scaled Kraken offsets and Mermaid/Leviathan LZ commands remain
-unsupported. Packed RLE command buffers may use any supported byte-array
-encoding. Checksummed blocks are explicitly rejected.
+lengths. Scaled Kraken offsets and excess-byte streams remain unsupported.
+Mermaid/Selkie LZ chunks support near and far offsets, long
+commands, delta literals, and split 64 KiB command streams. Leviathan LZ
+commands remain unsupported. Packed RLE command buffers may use any supported
+byte-array encoding. Checksummed blocks are explicitly rejected.
 
 ## Build
 
@@ -99,13 +101,14 @@ symbol ranges with the same bounded cursor. The scalar implementation is the
 correctness baseline; platform-specific acceleration can be considered after
 the remaining entropy codecs are ported and benchmarked.
 
-Whole-match distances may exceed LZB16's 16-bit window. `OozDecoder`,
-`decompress`, and `decompressInto` accept `historyCapacity` in bytes
-(default/minimum 65,536). Increase it before decoding streams requiring a larger
-window. A reference before stream start is malformed; a valid reference beyond
-the retained window throws `UnsupportedOperationException` with the required
-distance. History never grows automatically. Distances are parsed as `Long` with
-overflow checks; capacities are limited to `Int` arrays.
+Whole-match, Kraken, and Mermaid distances may exceed LZB16's 16-bit window.
+`OozDecoder`, `decompress`, and `decompressInto` accept `historyCapacity` in
+bytes (default/minimum 65,536). Increase it before decoding streams requiring a
+larger window. A reference before the applicable stream or codec restart is
+malformed; a valid reference beyond the retained window throws
+`UnsupportedOperationException` with the required distance. History never grows
+automatically. Framing distances are parsed as `Long` with overflow checks;
+capacities are limited to `Int` arrays.
 
 Keep codecs separate from framing, archives, and I/O adapters. Follow familiar
 Kotlin I/O conventions without importing kotlinx-io or recreating its types.
@@ -134,7 +137,8 @@ accounting, and the depth limit. tANS checks cover legacy and Golomb-Rice table
 construction, symbol ranges, its five interleaved states, recursive nesting,
 truncation, and all three shared large-quantum framings. Kraken checks cover
 ordinary/delta literals, recent/explicit offsets, overlapping matches, and both
-inline and variable-bit extended lengths. `check`
+inline and variable-bit extended lengths. Mermaid checks cover ordinary/delta
+literals, near/far offsets, long commands, and the 64 KiB command split. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
@@ -171,11 +175,13 @@ The shared byte-array layer follows `decode_bytes`, `decode_rle`, and
 the raw and byte-array branches of `decode_quantum`. Kraken command processing
 follows `KrakenLzTable`, including the traditional two-ended offset/length bit
 stream and forward-expanding match copies. Scaled offsets, excess-byte streams,
-and the Mermaid/Leviathan command processors remain deferred. Tests for these
-paths include constructed command vectors. All Kraken files in the inspected
-local corpus—including restart and cross-block history fixtures—also decoded
-byte-for-byte to their reference outputs. Mermaid and Leviathan remain covered
-only at their shared framing and entropy-array boundary.
+and the Leviathan command processor remain deferred. Mermaid/Selkie processing
+follows `MermaidLzTable`, including raw or entropy-coded near offsets, far
+offsets, long lengths, and its two 64 KiB command partitions. Tests for these
+paths include constructed command vectors. All Kraken, Mermaid, and Selkie files
+in the inspected local corpus—including Kraken restart and cross-block history
+fixtures—decoded byte-for-byte to their reference outputs. Leviathan remains
+covered only at its shared framing and entropy-array boundary.
 
 Legacy Huffman behavior follows `decode_bytes_type12`,
 `huff_read_code_lengths_old`, and the scalar semantics of `HuffReader`. During

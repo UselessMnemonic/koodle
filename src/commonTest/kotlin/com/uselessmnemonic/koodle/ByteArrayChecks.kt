@@ -219,6 +219,26 @@ internal fun checkByteArrays() {
         val payload = prefix + literals + commands + offsets + lengths + variableBits
         return be(0x800000L or (mode.toLong() shl 19) or payload.size.toLong(), 3) + payload
     }
+    fun mermaidChunk(
+        mode: Int,
+        literals: ByteArray,
+        commands: ByteArray = raw(ByteArray(0)),
+        nearOffsets: IntArray = IntArray(0),
+        farOffsets: IntArray = IntArray(0),
+        lengths: ByteArray = ByteArray(0),
+        outputSize: Int = 100,
+    ): ByteArray {
+        fun little(value: Int, count: Int): ByteArray =
+            ByteArray(count) { (value ushr (8 * it)).toByte() }
+        val prefix = ByteArray(8) { (it + 1).toByte() }
+        val farSizes = farOffsets.size shl 12
+        val commandSplit = if (outputSize > 0x10000) little(0, 2) else ByteArray(0)
+        val payload = prefix + literals + commands + commandSplit + little(nearOffsets.size, 2) +
+            nearOffsets.fold(ByteArray(0)) { bytes, offset -> bytes + little(offset, 2) } +
+            little(farSizes, 3) +
+            farOffsets.fold(ByteArray(0)) { bytes, offset -> bytes + little(offset, 3) } + lengths
+        return be(0x800000L or (mode.toLong() shl 19) or payload.size.toLong(), 3) + payload
+    }
     // Short array headers are internal-only here: large chunk dispatch uses bit 23.
     val arrays = raw(ByteArray(0x20000) { (it % 251).toByte() }) + encoded(bytes(42), 19)
     val expected = ByteArray(0x20000) { (it % 251).toByte() } + ByteArray(19) { 42 }
@@ -254,7 +274,8 @@ internal fun checkByteArrays() {
     rejectsArray<DecompressionException> { decompress(framed(raw(plain), 6), 6) }
     rejectsArray<DecompressionException> { decompress(framed(raw(plain) + bytes(99), 6), 5) }
     rejectsArray<DecompressionException> { decompress(framed(be(0x800001, 3) + bytes(0), 6), 5) }
-    rejectsArray<UnsupportedOperationException> { decompress(framed(be(0x800001, 3) + bytes(0), 10), 5) }
+    rejectsArray<DecompressionException> { decompress(framed(be(0x800001, 3) + bytes(0), 10), 5) }
+    rejectsArray<UnsupportedOperationException> { decompress(framed(be(0x800001, 3) + bytes(0), 12), 5) }
     val krakenPrefix = ByteArray(8) { (it + 1).toByte() }
     val krakenLiterals = krakenPrefix + ByteArray(92) { 42 }
     check(decompress(framed(krakenChunk(1, encoded(bytes(42), 92)), 6), 100)
@@ -322,6 +343,47 @@ internal fun checkByteArrays() {
     }
     check(decompress(historyStream, historyExpected.size, historyCapacity = historyExpected.size)
         .contentEquals(historyExpected))
+    val mermaidLiterals = krakenPrefix + ByteArray(92) { 42 }
+    check(decompress(framed(mermaidChunk(1, encoded(bytes(42), 92)), 10), 100)
+        .contentEquals(mermaidLiterals))
+    val mermaidRecent = krakenPrefix + krakenPrefix.copyOfRange(0, 4) + ByteArray(88) { 42 }
+    check(decompress(
+        framed(
+            mermaidChunk(
+                1, encoded(bytes(42), 88), commands = raw(bytes(32)),
+                nearOffsets = intArrayOf(8),
+            ),
+            10,
+        ),
+        100,
+    ).contentEquals(mermaidRecent))
+    val mermaidFar = krakenPrefix + krakenPrefix + ByteArray(84) { 42 }
+    check(decompress(
+        framed(
+            mermaidChunk(
+                1, encoded(bytes(42), 84), commands = raw(bytes(3)),
+                farOffsets = intArrayOf(0),
+            ),
+            10,
+        ),
+        100,
+    ).contentEquals(mermaidFar))
+    check(decompress(
+        framed(
+            mermaidChunk(
+                1, encoded(bytes(42), 92), commands = raw(bytes(0)), lengths = bytes(0),
+            ),
+            10,
+        ),
+        100,
+    ).contentEquals(mermaidLiterals))
+    check(decompress(framed(mermaidChunk(0, encoded(bytes(1), 92)), 10), 100)
+        .contentEquals(deltaExpected))
+    val splitMermaidExpected = krakenPrefix + ByteArray(69_992) { 42 }
+    check(decompress(
+        framed(mermaidChunk(1, encoded(bytes(42), 69_992), outputSize = 70_000), 10),
+        70_000,
+    ).contentEquals(splitMermaidExpected))
     val full = framed(encoded(bytes(0xab), 0x20000) + encoded(bytes(0xcd), 0x20000), 6)
     check(decompress(full, 0x40000).contentEquals(ByteArray(0x20000) { 0xab.toByte() } + ByteArray(0x20000) { 0xcd.toByte() }))
     for (cut in full.indices) rejectsArray<DecompressionException> { decompress(full.copyOf(cut), 0x40000) }

@@ -7,23 +7,24 @@ internal class DecodeHistory(capacity: Int) {
     private val bytes = ByteArray(capacity)
     private var next = 0
     private var available = 0
-    private var sinceRestart = 0
     private var codecHasOutput = false
+    private var codecTotal = 0L
     private var total = 0L
 
     fun restartCodec() {
-        sinceRestart = 0
         codecHasOutput = false
+        codecTotal = 0
     }
 
     val hasCodecOutput: Boolean get() = codecHasOutput
+    val codecOutputCount: Long get() = codecTotal
 
     fun append(value: Byte) {
         bytes[next] = value
         if (++next == bytes.size) next = 0
         if (available < bytes.size) available++
-        if (sinceRestart < bytes.size) sinceRestart++
         codecHasOutput = true
+        codecTotal++
         total++
     }
 
@@ -32,7 +33,14 @@ internal class DecodeHistory(capacity: Int) {
     }
 
     fun previous(distance: Int): Byte {
-        if (distance !in 1..sinceRestart) throw DecompressionException("Codec match precedes available history")
+        if (distance <= 0 || distance.toLong() > codecTotal) {
+            throw DecompressionException("Codec match precedes the restart boundary")
+        }
+        if (distance > bytes.size) {
+            throw UnsupportedOperationException(
+                "Codec match distance $distance exceeds history capacity ${bytes.size}; increase historyCapacity",
+            )
+        }
         return previousWholeMatch(distance)
     }
 
