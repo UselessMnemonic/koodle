@@ -79,7 +79,7 @@ internal fun checkByteArrays() {
     malformed(encoded(bytes(0, 0xff), 14), 14) // output overshoot
     malformed(raw(bytes(1, 2)), 1) // caller capacity
     malformed(encoded(bytes(1, 2), 2), 2) // no compression in long header
-    for (kind in listOf(1, 5)) {
+    for (kind in listOf(1)) {
         val input = encoded(bytes(42), 31, kind)
         rejectsArray<UnsupportedOperationException> { decodeByteArray(input, 0, input.size, ByteArray(31), 0, 31) }
     }
@@ -101,6 +101,50 @@ internal fun checkByteArrays() {
     }
     val packedExpected = ByteArray(300) { if (it % 30 < 15) 42 else 0 }
     for (kind in listOf(2, 3, 4)) verify(packedFill(kind), packedExpected)
+    fun recursive(children: List<ByteArray>, outputSize: Int, interleaved: Boolean = false): ByteArray =
+        encoded(
+            bytes(children.size or if (interleaved) 0x80 else 0) +
+                children.fold(ByteArray(0), ByteArray::plus),
+            outputSize,
+            5,
+        )
+    val recursiveFirst = encoded(bytes(7), 40)
+    val recursiveSecondTable = pack("00" + binary(1, 8) + binary(42, 8))
+    val recursiveSecond = encoded(recursiveSecondTable, 60, 2)
+    val sequential = recursive(listOf(recursiveFirst, recursiveSecond), 100)
+    verify(sequential, ByteArray(40) { 7 } + ByteArray(60) { 42 })
+    val nestedSequential = recursive(listOf(recursive(listOf(recursiveFirst), 40)), 40)
+    verify(nestedSequential, ByteArray(40) { 7 })
+    var tooDeep = encoded(bytes(7), 1000)
+    repeat(65) { tooDeep = recursive(listOf(tooDeep), 1000) }
+    rejectsArray<DecompressionException> {
+        decodeByteArray(tooDeep, 0, tooDeep.size, ByteArray(1000), 0, 1000)
+    }
+    val recursiveLiterals = recursive(listOf(encoded(bytes(42), 150)), 150)
+    val recursivePackedRle = encoded(recursiveLiterals + ByteArray(10) { 0xf0.toByte() }, 300)
+    verify(recursivePackedRle, packedExpected)
+    rejectsArray<UnsupportedOperationException> {
+        val input = recursive(listOf(recursiveFirst), 40, interleaved = true)
+        decodeByteArray(input, 0, input.size, ByteArray(40), 0, 40)
+    }
+    for (count in listOf(0, 3, 127)) {
+        val input = encoded(bytes(count) + ByteArray(5), 40, 5)
+        rejectsArray<DecompressionException> {
+            decodeByteArray(input, 0, input.size, ByteArray(40), 0, 40)
+        }
+    }
+    val recursiveUndershoot = recursive(listOf(recursiveFirst), 41)
+    rejectsArray<DecompressionException> {
+        decodeByteArray(recursiveUndershoot, 0, recursiveUndershoot.size, ByteArray(41), 0, 41)
+    }
+    val recursiveTrailing = encoded(bytes(1) + recursiveFirst + bytes(99), 40, 5)
+    rejectsArray<DecompressionException> {
+        decodeByteArray(recursiveTrailing, 0, recursiveTrailing.size, ByteArray(40), 0, 40)
+    }
+    val recursiveUnsupported = recursive(listOf(encoded(bytes(1), 40, kind = 1)), 40)
+    rejectsArray<UnsupportedOperationException> {
+        decodeByteArray(recursiveUnsupported, 0, recursiveUnsupported.size, ByteArray(40), 0, 40)
+    }
     val tooLargeNested = encoded(bytes(7), 0x40000)
     val workspaceOverflow = encoded(tooLargeNested + bytes(0), 0x40000)
     rejectsArray<DecompressionException> {
@@ -119,6 +163,8 @@ internal fun checkByteArrays() {
     for (kind in listOf(6, 10, 12)) {
         check(decompress(framed(arrays, kind), expected.size).contentEquals(expected))
         check(decompress(framed(packedFill(2), kind), packedExpected.size).contentEquals(packedExpected))
+        check(decompress(framed(sequential, kind), 100)
+            .contentEquals(ByteArray(40) { 7 } + ByteArray(60) { 42 }))
         val input = framed(encoded(bytes(71), 123), kind)
         for (inputChunk in 1..input.size) for (outputChunk in listOf(1, 13, 123)) {
             val decoder = OozDecoder(123)

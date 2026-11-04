@@ -82,12 +82,16 @@ internal fun decodeByteArray(
     source: ByteArray, start: Int, end: Int,
     destination: ByteArray, destinationStart: Int, destinationEnd: Int,
     workspace: EntropyWorkspace = EntropyWorkspace(), workspaceStart: Int = 0,
+    depth: Int = 0,
 ): ByteArrayHeader {
     require(destinationStart >= 0 && destinationEnd >= destinationStart && destinationEnd <= destination.size)
     require(source !== destination)
+    if (depth > 64) throw DecompressionException("Byte-array nesting is too deep")
     val header = readByteArrayHeader(source, start, end, destinationEnd - destinationStart)
     val payload = start + header.headerSize
     val payloadEnd = payload + header.encodedSize
+    val nestedWorkspaceStart =
+        if (workspace.owns(destination)) maxOf(workspaceStart, destinationStart + header.decodedSize) else workspaceStart
     when (header.encoding) {
         ByteEncoding.RAW -> source.copyInto(destination, destinationStart, payload, payloadEnd)
         ByteEncoding.HUFFMAN, ByteEncoding.HUFFMAN6 -> decodeHuffman(
@@ -96,18 +100,50 @@ internal fun decodeByteArray(
         )
         ByteEncoding.RLE -> decodeRle(
             source, payload, payloadEnd, destination, destinationStart, destinationStart + header.decodedSize,
-            workspace,
-            if (workspace.owns(destination)) maxOf(workspaceStart, destinationStart + header.decodedSize) else workspaceStart,
+            workspace, nestedWorkspaceStart, depth,
+        )
+        ByteEncoding.RECURSIVE -> decodeRecursive(
+            source, payload, payloadEnd, destination, destinationStart, destinationStart + header.decodedSize,
+            workspace, nestedWorkspaceStart, depth,
         )
         else -> throw UnsupportedOperationException("Byte-array encoding ${header.encoding} is not supported yet")
     }
     return header
 }
 
+private fun decodeRecursive(
+    source: ByteArray, start: Int, end: Int,
+    output: ByteArray, outputStart: Int, outputEnd: Int,
+    workspace: EntropyWorkspace, workspaceStart: Int, depth: Int,
+) {
+    if (end - start < 6) throw DecompressionException("Truncated recursive byte array")
+    val control = source[start].toInt() and 255
+    if (control and 0x80 != 0) {
+        throw UnsupportedOperationException("Interleaved multi-arrays are not supported yet")
+    }
+    val count = control and 0x7f
+    if (count > 2) throw DecompressionException("Too many sequential byte arrays")
+    var input = start + 1
+    var written = outputStart
+    repeat(count) {
+        val child = readByteArrayHeader(source, input, end, outputEnd - written)
+        val consumed = child.headerSize + child.encodedSize
+        decodeByteArray(
+            source, input, input + consumed,
+            output, written, written + child.decodedSize,
+            workspace, workspaceStart, depth + 1,
+        )
+        input += consumed
+        written += child.decodedSize
+    }
+    if (input != end) throw DecompressionException("Unused recursive byte-array input")
+    if (written != outputEnd) throw DecompressionException("Recursive byte-array output size mismatch")
+}
+
 private fun decodeRle(
     source: ByteArray, start: Int, end: Int,
     output: ByteArray, outStart: Int, outEnd: Int,
-    workspace: EntropyWorkspace, workspaceStart: Int,
+    workspace: EntropyWorkspace, workspaceStart: Int, depth: Int,
 ) {
     if (start == end) throw DecompressionException("Empty RLE payload")
     if (end - start == 1) {
@@ -135,7 +171,7 @@ private fun decodeRle(
             decodeByteArray(
                 source, start, start + consumed,
                 workspace.bytes, workspaceStart, workspaceStart + nested.decodedSize,
-                workspace, workspaceStart + nested.decodedSize,
+                workspace, workspaceStart + nested.decodedSize, depth + 1,
             )
             source.copyInto(
                 workspace.bytes, workspaceStart + nested.decodedSize,
