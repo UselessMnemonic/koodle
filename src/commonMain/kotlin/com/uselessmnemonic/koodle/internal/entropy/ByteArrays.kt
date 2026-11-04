@@ -11,6 +11,22 @@ internal data class ByteArrayHeader(
     val decodedSize: Int,
 )
 
+/** Lazily allocated bounded scratch arena shared by nested entropy decoders. */
+internal class EntropyWorkspace(private val capacity: Int = 0x40000) {
+    private var storage: ByteArray? = null
+
+    val bytes: ByteArray
+        get() = storage ?: ByteArray(capacity).also { storage = it }
+
+    fun owns(array: ByteArray): Boolean = storage === array
+
+    fun requireRange(start: Int, size: Int) {
+        if (start < 0 || size < 0 || start > capacity - size) {
+            throw DecompressionException("Nested byte arrays exceed entropy workspace")
+        }
+    }
+}
+
 /** Parses one bounded array, validating its entire payload and output capacity. */
 internal fun readByteArrayHeader(
     source: ByteArray, start: Int, end: Int, outputCapacity: Int,
@@ -65,6 +81,7 @@ internal fun readByteArrayHeader(
 internal fun decodeByteArray(
     source: ByteArray, start: Int, end: Int,
     destination: ByteArray, destinationStart: Int, destinationEnd: Int,
+    workspace: EntropyWorkspace = EntropyWorkspace(), workspaceStart: Int = 0,
 ): ByteArrayHeader {
     require(destinationStart >= 0 && destinationEnd >= destinationStart && destinationEnd <= destination.size)
     require(source !== destination)
@@ -77,29 +94,60 @@ internal fun decodeByteArray(
             source, payload, payloadEnd, destination, destinationStart, destinationStart + header.decodedSize,
             sixStreams = header.encoding == ByteEncoding.HUFFMAN6,
         )
-        ByteEncoding.RLE -> decodeRle(source, payload, payloadEnd, destination, destinationStart, destinationStart + header.decodedSize)
+        ByteEncoding.RLE -> decodeRle(
+            source, payload, payloadEnd, destination, destinationStart, destinationStart + header.decodedSize,
+            workspace,
+            if (workspace.owns(destination)) maxOf(workspaceStart, destinationStart + header.decodedSize) else workspaceStart,
+        )
         else -> throw UnsupportedOperationException("Byte-array encoding ${header.encoding} is not supported yet")
     }
     return header
 }
 
-private fun decodeRle(source: ByteArray, start: Int, end: Int, output: ByteArray, outStart: Int, outEnd: Int) {
+private fun decodeRle(
+    source: ByteArray, start: Int, end: Int,
+    output: ByteArray, outStart: Int, outEnd: Int,
+    workspace: EntropyWorkspace, workspaceStart: Int,
+) {
     if (start == end) throw DecompressionException("Empty RLE payload")
     if (end - start == 1) {
         output.fill(source[start], outStart, outEnd)
         return
     }
-    val commandsStart = if (source[start] == 0.toByte()) start + 1 else {
-        // A raw nested array's payload and following commands are contiguous.
-        // Other nested encodings require the entropy decoders still to be ported.
+    val commandSource: ByteArray
+    val commandsStart: Int
+    val commandsEnd: Int
+    if (source[start] == 0.toByte()) {
+        commandSource = source
+        commandsStart = start + 1
+        commandsEnd = end
+    } else {
         val nested = readByteArrayHeader(source, start, end, 0x40000)
-        if (nested.encoding != ByteEncoding.RAW) {
-            throw UnsupportedOperationException("Packed RLE command arrays are not supported yet")
+        if (nested.encoding == ByteEncoding.RAW) {
+            commandSource = source
+            commandsStart = start + nested.headerSize
+            commandsEnd = end
+        } else {
+            val consumed = nested.headerSize + nested.encodedSize
+            val trailing = end - start - consumed
+            val commandSize = nested.decodedSize + trailing
+            workspace.requireRange(workspaceStart, commandSize)
+            decodeByteArray(
+                source, start, start + consumed,
+                workspace.bytes, workspaceStart, workspaceStart + nested.decodedSize,
+                workspace, workspaceStart + nested.decodedSize,
+            )
+            source.copyInto(
+                workspace.bytes, workspaceStart + nested.decodedSize,
+                start + consumed, end,
+            )
+            commandSource = workspace.bytes
+            commandsStart = workspaceStart
+            commandsEnd = workspaceStart + commandSize
         }
-        start + nested.headerSize
     }
     var front = commandsStart
-    var back = end
+    var back = commandsEnd
     var written = outStart
     var fill: Byte = 0
     fun copyAndFill(literals: Int, repeats: Int) {
@@ -107,14 +155,14 @@ private fun decodeRle(source: ByteArray, start: Int, end: Int, output: ByteArray
         if (literals > outEnd - written || repeats > outEnd - written - literals) {
             throw DecompressionException("RLE command exceeds output")
         }
-        source.copyInto(output, written, front, front + literals)
+        commandSource.copyInto(output, written, front, front + literals)
         front += literals
         written += literals
         output.fill(fill, written, written + repeats)
         written += repeats
     }
     while (front < back) {
-        val command = source[back - 1].toInt() and 255
+        val command = commandSource[back - 1].toInt() and 255
         when {
             command == 0 || command > 0x2f -> {
                 back--
@@ -123,12 +171,12 @@ private fun decodeRle(source: ByteArray, start: Int, end: Int, output: ByteArray
             command == 1 -> {
                 back--
                 if (front == back) throw DecompressionException("Missing RLE fill value")
-                fill = source[front++]
+                fill = commandSource[front++]
             }
             else -> {
                 if (back - front < 2) throw DecompressionException("Truncated RLE command")
                 back -= 2
-                val word = (source[back].toInt() and 255) or (command shl 8)
+                val word = (commandSource[back].toInt() and 255) or (command shl 8)
                 when {
                     command >= 0x10 -> {
                         val data = word - 4096

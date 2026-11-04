@@ -9,8 +9,9 @@ Mermaid/Selkie, and Leviathan framing. Both sparse and dense legacy Huffman
 tables are supported for the three-stream and six-stream byte-array layouts,
 including single-symbol fills. Newer Golomb-Rice Huffman tables and their compact
 symbol-range maps are also supported. These are partial codec paths; tANS,
-recursive arrays, packed RLE commands, and LZ chunk commands remain unsupported.
-Checksummed blocks are explicitly rejected.
+recursive arrays, and LZ chunk commands remain unsupported. Packed RLE command
+buffers may use raw, RLE, or either supported Huffman encoding. Checksummed
+blocks are explicitly rejected.
 
 ## Build
 
@@ -75,7 +76,11 @@ reused, requiring at most 512 KiB of working buffers plus history, independently
 of stream size. The shared byte-array layer validates short/long headers and
 encoded/decoded sizes. Its RLE decoder handles a single-byte fill, unpacked
 commands, and raw nested command arrays without allocating scratch buffers.
-Other nested command arrays are explicitly deferred.
+Packed command arrays decode into a lazy, reusable 256 KiB entropy workspace;
+their untouched suffix is appended in that arena before the two-ended RLE pass.
+Nested decoders use nonoverlapping arena regions, and inputs exceeding the fixed
+workspace fail before writing. tANS and recursive nested arrays are explicitly
+deferred.
 
 The Huffman decoder uses a portable scalar canonical-code table and bounds-checked
 bit readers. It supports sparse symbol lists and dense alternating symbol runs,
@@ -115,7 +120,8 @@ LZB16 command forms, overlap expansion, history wraparound/restarts, whole-match
 distance encodings, overflow, capacity limits, byte-array header variants, RLE
 command forms, legacy sparse/dense Huffman tables and stream layouts, 128 KiB
 chunk boundaries, Golomb-Rice tables, sparse symbol-range maps, and decoder
-failure state. `check`
+failure state. Packed-RLE checks cover nested raw, RLE, Huffman, and Huffman6
+arrays plus workspace exhaustion. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
@@ -166,6 +172,12 @@ New Huffman behavior follows `huff_read_code_lengths_new`,
 bounds-checked scalar bit parsing. Constructed checks cover all forced-bit widths,
 initial and internal symbol gaps, one and 256-symbol alphabets, and both output
 stream layouts.
+
+Packed RLE behavior follows the scratch-buffer branch of `decode_rle`: a leading
+byte array is decoded into bounded workspace, remaining command bytes are
+appended, and `decode_rle_unpacked` consumes literals from the front and commands
+from the back. The workspace is owned and reused by `OozDecoder`; direct internal
+byte-array decoding creates one only when a packed RLE path needs it.
 
 The checked-in regression suite uses self-contained constructed vectors and
 does not require that sibling repository.

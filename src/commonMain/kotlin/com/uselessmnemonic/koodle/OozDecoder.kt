@@ -5,6 +5,7 @@ import com.uselessmnemonic.koodle.internal.QuantumHeaderParser
 import com.uselessmnemonic.koodle.internal.DecodeHistory
 import com.uselessmnemonic.koodle.internal.codec.decodeLzb16
 import com.uselessmnemonic.koodle.internal.entropy.decodeStoredQuantum
+import com.uselessmnemonic.koodle.internal.entropy.EntropyWorkspace
 
 /**
  * Decodes Oodle block framing with an exact [outputSize] supplied by its enclosing container.
@@ -40,6 +41,7 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
     private var compressedCount = 0
     private var decodedOffset = 0
     private var quantumDecoded = false
+    private val entropyWorkspace = EntropyWorkspace()
     private var failed = false
 
     private fun advanceOutput(count: Int) {
@@ -108,7 +110,7 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
                         if (decoderType == 2) {
                             decodeLzb16(payload, current.size, buffer, quantumRemaining, history)
                         } else {
-                            decodeStoredQuantum(payload, current.size, buffer, quantumRemaining)
+                            decodeStoredQuantum(payload, current.size, buffer, quantumRemaining, entropyWorkspace)
                             history.append(buffer, 0, quantumRemaining)
                         }
                         quantumDecoded = true

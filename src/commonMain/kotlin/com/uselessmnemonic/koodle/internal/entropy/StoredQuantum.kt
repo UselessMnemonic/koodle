@@ -5,7 +5,10 @@ import com.uselessmnemonic.koodle.DecompressionException
 /** Shared 128 KiB chunk framing for Kraken, Mermaid/Selkie, and Leviathan.
  * Only raw and supported byte-array paths are implemented, not LZ commands.
  */
-internal fun decodeStoredQuantum(input: ByteArray, inputSize: Int, output: ByteArray, outputSize: Int) {
+internal fun decodeStoredQuantum(
+    input: ByteArray, inputSize: Int, output: ByteArray, outputSize: Int,
+    workspace: EntropyWorkspace,
+) {
     var source = 0
     var destination = 0
     while (destination < outputSize) {
@@ -14,7 +17,9 @@ internal fun decodeStoredQuantum(input: ByteArray, inputSize: Int, output: ByteA
         val bits = ((input[source].toInt() and 255) shl 16) or
             ((input[source + 1].toInt() and 255) shl 8) or (input[source + 2].toInt() and 255)
         if (bits and 0x800000 == 0) {
-            val header = decodeByteArray(input, source, inputSize, output, destination, destination + count)
+            val header = decodeByteArray(
+                input, source, inputSize, output, destination, destination + count, workspace,
+            )
             if (header.decodedSize != count) throw DecompressionException("Chunk output size mismatch")
             source += header.headerSize + header.encodedSize
         } else {

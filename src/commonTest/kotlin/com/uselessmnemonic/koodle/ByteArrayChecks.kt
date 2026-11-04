@@ -14,6 +14,14 @@ private inline fun <reified T : Throwable> rejectsArray(block: () -> Unit) {
 internal fun checkByteArrays() {
     fun bytes(vararg values: Int): ByteArray = ByteArray(values.size) { values[it].toByte() }
     fun be(value: Long, count: Int): ByteArray = ByteArray(count) { (value ushr (8 * (count - 1 - it))).toByte() }
+    fun binary(value: Int, width: Int): String = value.toString(2).padStart(width, '0')
+    fun pack(bits: String): ByteArray {
+        val result = ByteArray((bits.length + 7) / 8)
+        for (index in bits.indices) if (bits[index] == '1') {
+            result[index / 8] = (result[index / 8].toInt() or (1 shl (7 - index % 8))).toByte()
+        }
+        return result
+    }
     fun raw(payload: ByteArray, short: Boolean = false): ByteArray =
         be(payload.size.toLong() or (if (short) 0x8000L else 0L), if (short) 2 else 3) + payload
     fun encoded(payload: ByteArray, size: Int, kind: Int = 3, short: Boolean = false): ByteArray {
@@ -75,8 +83,33 @@ internal fun checkByteArrays() {
         val input = encoded(bytes(42), 31, kind)
         rejectsArray<UnsupportedOperationException> { decodeByteArray(input, 0, input.size, ByteArray(31), 0, 31) }
     }
-    val packed = encoded(encoded(bytes(42), 20), 50)
-    rejectsArray<UnsupportedOperationException> { decodeByteArray(packed, 0, packed.size, ByteArray(50), 0, 50) }
+    val malformedPacked = encoded(encoded(bytes(42), 20), 50)
+    rejectsArray<DecompressionException> {
+        decodeByteArray(malformedPacked, 0, malformedPacked.size, ByteArray(50), 0, 50)
+    }
+    fun packedFill(kind: Int): ByteArray {
+        val literalCount = 150
+        val nested = when (kind) {
+            2, 4 -> {
+                val table = pack("00" + binary(1, 8) + binary(42, 8))
+                encoded(table, literalCount, kind)
+            }
+            3 -> encoded(bytes(42), literalCount, kind)
+            else -> error("Unexpected nested kind")
+        }
+        return encoded(nested + ByteArray(10) { 0xf0.toByte() }, 300)
+    }
+    val packedExpected = ByteArray(300) { if (it % 30 < 15) 42 else 0 }
+    for (kind in listOf(2, 3, 4)) verify(packedFill(kind), packedExpected)
+    val tooLargeNested = encoded(bytes(7), 0x40000)
+    val workspaceOverflow = encoded(tooLargeNested + bytes(0), 0x40000)
+    rejectsArray<DecompressionException> {
+        decodeByteArray(workspaceOverflow, 0, workspaceOverflow.size, ByteArray(0x40000), 0, 0x40000)
+    }
+    val unsupportedNested = encoded(encoded(bytes(1), 100, kind = 1) + bytes(0xff), 100)
+    rejectsArray<UnsupportedOperationException> {
+        decodeByteArray(unsupportedNested, 0, unsupportedNested.size, ByteArray(100), 0, 100)
+    }
     rejectsArray<IllegalArgumentException> { readByteArrayHeader(bytes(0, 0), -1, 2, 0) }
 
     fun framed(payload: ByteArray, kind: Int): ByteArray = bytes(0x8c, kind) + be((payload.size - 1).toLong(), 3) + payload
@@ -85,6 +118,7 @@ internal fun checkByteArrays() {
     val expected = ByteArray(0x20000) { (it % 251).toByte() } + ByteArray(19) { 42 }
     for (kind in listOf(6, 10, 12)) {
         check(decompress(framed(arrays, kind), expected.size).contentEquals(expected))
+        check(decompress(framed(packedFill(2), kind), packedExpected.size).contentEquals(packedExpected))
         val input = framed(encoded(bytes(71), 123), kind)
         for (inputChunk in 1..input.size) for (outputChunk in listOf(1, 13, 123)) {
             val decoder = OozDecoder(123)
