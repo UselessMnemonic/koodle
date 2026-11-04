@@ -73,6 +73,10 @@ internal fun decodeByteArray(
     val payloadEnd = payload + header.encodedSize
     when (header.encoding) {
         ByteEncoding.RAW -> source.copyInto(destination, destinationStart, payload, payloadEnd)
+        ByteEncoding.HUFFMAN, ByteEncoding.HUFFMAN6 -> decodeHuffman(
+            source, payload, payloadEnd, destination, destinationStart, destinationStart + header.decodedSize,
+            sixStreams = header.encoding == ByteEncoding.HUFFMAN6,
+        )
         ByteEncoding.RLE -> decodeRle(source, payload, payloadEnd, destination, destinationStart, destinationStart + header.decodedSize)
         else -> throw UnsupportedOperationException("Byte-array encoding ${header.encoding} is not supported yet")
     }

@@ -71,6 +71,7 @@ public fun main() {
     fails<IllegalStateException> { failed.decode(encoded, ByteArray(1)) }
     check(OozDecoder(Long.MAX_VALUE).decode(encoded, ByteArray(5)).status == DecodeStatus.NEEDS_OUTPUT)
     check(decompress(ByteArray(0), 0).isEmpty())
+    checkHuffman()
     checkByteArrays()
     checkWholeMatches()
     checkLzb16()

@@ -71,7 +71,7 @@ internal fun checkByteArrays() {
     malformed(encoded(bytes(0, 0xff), 14), 14) // output overshoot
     malformed(raw(bytes(1, 2)), 1) // caller capacity
     malformed(encoded(bytes(1, 2), 2), 2) // no compression in long header
-    for (kind in listOf(1, 2, 4, 5)) {
+    for (kind in listOf(1, 5)) {
         val input = encoded(bytes(42), 31, kind)
         rejectsArray<UnsupportedOperationException> { decodeByteArray(input, 0, input.size, ByteArray(31), 0, 31) }
     }

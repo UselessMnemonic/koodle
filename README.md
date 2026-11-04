@@ -5,9 +5,11 @@ A Kotlin Multiplatform starting point for a port of
 `com.uselessmnemonic.koodle`. Supports LZB16 compressed quanta, raw blocks, fill
 quanta, whole-match quanta, and uncompressed small quanta. The shared large-quantum
 path also supports raw chunks and raw/RLE byte arrays under Kraken,
-Mermaid/Selkie, and Leviathan framing. These are partial codec paths; Huffman,
-tANS, recursive arrays, packed RLE commands, and LZ chunk commands remain
-unsupported. Checksummed blocks are explicitly rejected.
+Mermaid/Selkie, and Leviathan framing. Legacy sparse Huffman tables are supported
+for the three-stream and six-stream byte-array layouts, including single-symbol
+fills. These are partial codec paths; dense/new Huffman tables, tANS, recursive
+arrays, packed RLE commands, and LZ chunk commands remain unsupported.
+Checksummed blocks are explicitly rejected.
 
 ## Build
 
@@ -74,6 +76,12 @@ encoded/decoded sizes. Its RLE decoder handles a single-byte fill, unpacked
 commands, and raw nested command arrays without allocating scratch buffers.
 Other nested command arrays are explicitly deferred.
 
+The Huffman decoder uses a portable scalar canonical-code table and bounds-checked
+bit readers. It supports code lengths through 11 bits and validates complete
+tables, duplicate symbols, stream splits, and stream consumption. The scalar
+implementation is the correctness baseline; platform-specific acceleration can
+be considered after the remaining table formats are ported and benchmarked.
+
 Whole-match distances may exceed LZB16's 16-bit window. `OozDecoder`,
 `decompress`, and `decompressInto` accept `historyCapacity` in bytes
 (default/minimum 65,536). Increase it before decoding streams requiring a larger
@@ -99,7 +107,8 @@ fragmented input/output, block and quantum boundaries, mixed fill/raw quanta,
 array ranges, trailing input, truncated and invalid headers, unsupported features,
 LZB16 command forms, overlap expansion, history wraparound/restarts, whole-match
 distance encodings, overflow, capacity limits, byte-array header variants, RLE
-command forms, 128 KiB chunk boundaries, and decoder failure state. `check`
+command forms, legacy sparse Huffman tables and stream layouts, 128 KiB chunk
+boundaries, and decoder failure state. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
@@ -136,6 +145,13 @@ The shared byte-array layer follows `decode_bytes`, `decode_rle`, and
 the raw and byte-array branches of `decode_quantum`; it does not yet implement
 algorithm-specific LZ command processing. Tests for these new paths use
 constructed vectors, not full compressed Kraken/Mermaid/Leviathan fixtures.
+
+Legacy Huffman behavior follows `decode_bytes_type12`,
+`huff_read_code_lengths_old`, and the scalar semantics of `HuffReader`. During
+this port, the local `single-symbol-huffman.kraken` fixture decoded all 100 bytes
+and matched its reference output. Multi-symbol checks use constructed canonical
+tables because no matching standalone fixture was present in the inspected test
+data.
 
 The checked-in regression suite uses self-contained constructed vectors and
 does not require that sibling repository.
