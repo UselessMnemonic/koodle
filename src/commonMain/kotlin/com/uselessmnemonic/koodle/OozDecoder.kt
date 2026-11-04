@@ -11,15 +11,15 @@ import com.uselessmnemonic.koodle.internal.entropy.EntropyWorkspace
  * Decodes Oodle block framing with an exact [outputSize] supplied by its enclosing container.
  * Supports LZB16, raw blocks, fills, whole matches, and uncompressed small quanta.
  * Large quanta support every byte-array entropy encoding and the traditional
- * Kraken and Mermaid/Selkie LZ command paths plus Leviathan modes 0 and 1.
- * Scaled Kraken offsets, Leviathan multi-array modes, and checksums throw
- * [UnsupportedOperationException]. Codec and byte-array decoding are separate
- * from framing.
+ * Kraken and Mermaid/Selkie LZ command paths plus all six Leviathan literal
+ * modes and multi-array commands. Scaled Kraken offsets, recursive Leviathan
+ * packed metadata, and checksums throw [UnsupportedOperationException]. Codec
+ * and byte-array decoding are separate from framing.
  *
  * Input and output can be supplied in bounded chunks, even for sizes exceeding array limits.
  * Working memory is bounded by [historyCapacity] (default 64 KiB, minimum 64 KiB)
  * plus two lazy quantum buffers (16 KiB each for LZB16, up to 256 KiB each
- * for large quanta). Whole matches may reference output before
+ * for large quanta) and up to two lazy 256 KiB entropy arenas. Whole matches may reference output before
  * a codec restart. Distances beyond retained history throw [UnsupportedOperationException];
  * select a larger capacity before decoding if required by the input.
  */
@@ -44,6 +44,7 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
     private var decodedOffset = 0
     private var quantumDecoded = false
     private val entropyWorkspace = EntropyWorkspace()
+    private val codecScratchWorkspace = EntropyWorkspace()
     private var failed = false
 
     private fun advanceOutput(count: Int) {
@@ -114,7 +115,7 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
                         } else {
                             decodeStoredQuantum(
                                 payload, current.size, buffer, quantumRemaining, decoderType,
-                                entropyWorkspace, history,
+                                entropyWorkspace, codecScratchWorkspace, history,
                             )
                             history.append(buffer, 0, quantumRemaining)
                         }

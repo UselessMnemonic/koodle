@@ -9,7 +9,8 @@ import com.uselessmnemonic.koodle.internal.codec.decodeMermaidChunk
 /** Shared 128 KiB framing plus dispatch to algorithm-specific LZ command processors. */
 internal fun decodeStoredQuantum(
     input: ByteArray, inputSize: Int, output: ByteArray, outputSize: Int,
-    decoderType: Int, workspace: EntropyWorkspace, history: DecodeHistory,
+    decoderType: Int, workspace: EntropyWorkspace, codecScratch: EntropyWorkspace,
+    history: DecodeHistory,
 ) {
     var source = 0
     var destination = 0
@@ -39,7 +40,8 @@ internal fun decodeStoredQuantum(
                         input, source, source + size, output, destination, count, mode, workspace, history,
                     )
                     12 -> decodeLeviathanChunk(
-                        input, source, source + size, output, destination, count, mode, workspace, history,
+                        input, source, source + size, output, destination, count, mode,
+                        workspace, codecScratch, history,
                     )
                     else -> throw UnsupportedOperationException(
                         "LZ commands for decoder $decoderType are not supported yet",

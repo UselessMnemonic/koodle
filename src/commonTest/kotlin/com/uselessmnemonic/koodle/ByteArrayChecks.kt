@@ -253,6 +253,8 @@ internal fun checkByteArrays() {
         val payload = prefix + scale + offsets + lengths + literals + commands + variableBits
         return be(0x800000L or (mode.toLong() shl 19) or payload.size.toLong(), 3) + payload
     }
+    fun directMultiArray(children: List<ByteArray>): ByteArray =
+        bytes(0x80) + children.fold(ByteArray(0), ByteArray::plus)
     // Short array headers are internal-only here: large chunk dispatch uses bit 23.
     val arrays = raw(ByteArray(0x20000) { (it % 251).toByte() }) + encoded(bytes(42), 19)
     val expected = ByteArray(0x20000) { (it % 251).toByte() } + ByteArray(19) { 42 }
@@ -290,7 +292,7 @@ internal fun checkByteArrays() {
     rejectsArray<DecompressionException> { decompress(framed(be(0x800001, 3) + bytes(0), 6), 5) }
     rejectsArray<DecompressionException> { decompress(framed(be(0x800001, 3) + bytes(0), 10), 5) }
     rejectsArray<DecompressionException> { decompress(framed(be(0x800001, 3) + bytes(0), 12), 5) }
-    rejectsArray<UnsupportedOperationException> { decompress(framed(be(0x900001, 3) + bytes(0), 12), 5) }
+    rejectsArray<DecompressionException> { decompress(framed(be(0x900001, 3) + bytes(0), 12), 5) }
     val krakenPrefix = ByteArray(8) { (it + 1).toByte() }
     val krakenLiterals = krakenPrefix + ByteArray(92) { 42 }
     check(decompress(framed(krakenChunk(1, encoded(bytes(42), 92)), 6), 100)
@@ -311,6 +313,9 @@ internal fun checkByteArrays() {
     ).contentEquals(recentExpected))
     val longLiteralExpected = krakenPrefix + ByteArray(5) { 42 } + bytes(6, 7, 8, 42) +
         ByteArray(83) { 42 }
+    val deltaExpected = ByteArray(100)
+    krakenPrefix.copyInto(deltaExpected)
+    for (index in 8 until deltaExpected.size) deltaExpected[index] = (deltaExpected[index - 8] + 1).toByte()
     check(decompress(
         framed(
             krakenChunk(
@@ -321,6 +326,41 @@ internal fun checkByteArrays() {
         ),
         100,
     ).contentEquals(longLiteralExpected))
+    val lamLiterals = directMultiArray(
+        listOf(encoded(bytes(1), 91), raw(bytes(1), short = true)),
+    )
+    check(decompress(framed(leviathanChunk(2, lamLiterals), 12), 100)
+        .contentEquals(deltaExpected))
+    val fourLiterals = directMultiArray(List(4) { encoded(bytes(1), 23) })
+    check(decompress(framed(leviathanChunk(3, fourLiterals), 12), 100)
+        .contentEquals(deltaExpected))
+    val o1Literals = directMultiArray(List(16) { stream ->
+        when (stream) {
+            0 -> encoded(bytes(42), 2, short = true)
+            2 -> encoded(bytes(42), 92, short = true)
+            else -> raw(bytes(42), short = true)
+        }
+    })
+    check(decompress(framed(leviathanChunk(4, o1Literals), 12), 100)
+        .contentEquals(krakenLiterals))
+    val sixteenCounts = IntArray(16)
+    for (position in 8 until 100) sixteenCounts[position and 15]++
+    val sixteenLiterals = directMultiArray(List(16) { stream ->
+        encoded(bytes(1), sixteenCounts[stream], short = true)
+    })
+    check(decompress(framed(leviathanChunk(5, sixteenLiterals), 12), 100)
+        .contentEquals(deltaExpected))
+    val commandArrays = List(8) { stream -> raw(if (stream == 0) bytes(2) else ByteArray(0)) }
+    check(decompress(
+        framed(
+            leviathanChunk(
+                1, encoded(bytes(42), 88),
+                commands = bytes(0x83) + directMultiArray(commandArrays),
+            ),
+            12,
+        ),
+        100,
+    ).contentEquals(recentExpected))
     val escapedLengthExpected = krakenPrefix + ByteArray(292) { 42 }
     check(decompress(
         framed(
@@ -332,9 +372,6 @@ internal fun checkByteArrays() {
         ),
         300,
     ).contentEquals(escapedLengthExpected))
-    val deltaExpected = ByteArray(100)
-    krakenPrefix.copyInto(deltaExpected)
-    for (index in 8 until deltaExpected.size) deltaExpected[index] = (deltaExpected[index - 8] + 1).toByte()
     check(decompress(framed(krakenChunk(0, encoded(bytes(1), 92)), 6), 100)
         .contentEquals(deltaExpected))
     val firstKrakenChunkOutput = ByteArray(0x20000) { it.toByte() }

@@ -14,11 +14,12 @@ concatenation and entropy-array interleaving. Kraken LZ chunks support ordinary
 and delta literals, recent and traditional explicit offsets, and extended
 lengths. Scaled Kraken offsets and excess-byte streams remain unsupported.
 Mermaid/Selkie LZ chunks support near and far offsets, long commands, delta
-literals, and split 64 KiB command streams. Leviathan modes 0 and 1 support raw
-or subtractive literals, recent offsets, traditional and scaled packed offsets,
-and extended lengths. Its multi-array literal/command modes and recursive packed
-offset streams remain deferred. Packed RLE command buffers may use any supported
-byte-array encoding. Checksummed blocks are explicitly rejected.
+literals, and split 64 KiB command streams. All six Leviathan modes support raw,
+subtractive, laminated, striped, and order-1 literal streams, single or
+multi-array commands, recent offsets, traditional and scaled packed offsets, and
+extended lengths. Recursive packed offset/length representations remain
+deferred. Packed RLE command buffers may use any supported byte-array encoding.
+Checksummed blocks are explicitly rejected.
 
 ## Build
 
@@ -78,9 +79,9 @@ reference earlier stream output. All produced output feeds history.
 
 Compressed input is buffered one quantum at a time, decoded into a reusable
 output buffer, then drained into caller-provided chunks. LZB16 uses two 16 KiB
-buffers; large quanta use two 256 KiB buffers. They are allocated lazily and
-reused, requiring at most 512 KiB of working buffers plus history, independently
-of stream size. The shared byte-array layer validates short/long headers and
+buffers; large quanta use two 256 KiB buffers plus as many as two lazy 256 KiB
+entropy arenas. They are allocated lazily and reused, requiring at most 1 MiB of
+working buffers plus history, independently of stream size. The shared byte-array layer validates short/long headers and
 encoded/decoded sizes. Its RLE decoder handles a single-byte fill, unpacked
 commands, and raw nested command arrays without allocating scratch buffers.
 Packed command arrays decode into a lazy, reusable 256 KiB entropy workspace;
@@ -141,8 +142,8 @@ truncation, and all three shared large-quantum framings. Kraken checks cover
 ordinary/delta literals, recent/explicit offsets, overlapping matches, and both
 inline and variable-bit extended lengths. Mermaid checks cover ordinary/delta
 literals, near/far offsets, long commands, and the 64 KiB command split.
-Leviathan checks cover modes 0/1, recent/traditional/scaled offsets, and extended
-literal lengths. `check`
+Leviathan checks cover all six literal modes, single/eight-way command streams,
+recent/traditional/scaled offsets, and extended literal lengths. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
@@ -181,14 +182,15 @@ follows `KrakenLzTable`, including the traditional two-ended offset/length bit
 stream and forward-expanding match copies. Scaled offsets, excess-byte streams,
 remain deferred. Mermaid/Selkie processing
 follows `MermaidLzTable`, including raw or entropy-coded near offsets, far
-offsets, long lengths, and its two 64 KiB command partitions. Leviathan modes 0
-and 1 follow `LeviathanLzTable` and its shared two-ended offset/length unpacker;
-multi-array modes and recursive packed-offset streams remain deferred. Tests for
+offsets, long lengths, and its two 64 KiB command partitions. All Leviathan modes
+follow `LeviathanLzTable`, including laminated, striped, and order-1 literal
+selection plus eight-way command streams. Recursive packed offset/length
+representations remain deferred. Tests for
 these paths include constructed command vectors. All Kraken, Mermaid, and Selkie files
 in the inspected local corpus—including Kraken restart and cross-block history
 fixtures—decoded byte-for-byte to their reference outputs. Leviathan remains
-partial: the NCI fixture matches its reference output, while multi-array modes
-and recursive packed-offset streams are rejected explicitly.
+partial: the NCI and X-ray fixtures match their reference output, while recursive
+packed offset/length streams are rejected explicitly.
 
 Legacy Huffman behavior follows `decode_bytes_type12`,
 `huff_read_code_lengths_old`, and the scalar semantics of `HuffReader`. During
@@ -226,8 +228,10 @@ Sequential recursive behavior follows the noninterleaved branch of
 `decode_recursive`: the control byte permits at most two child arrays, each child
 uses the same byte-array decoder, and decoded results are concatenated into the
 exact parent output range. The high-bit form follows `decode_multi_array`: it
-decodes entropy arrays into bounded workspace and interleaves intervals into the
-exact parent output range.
+decodes entropy arrays into one bounded arena and interleaves intervals into a
+separate destination arena. The generalized internal capability returns exact
+logical slices for Leviathan's 2/4/16 literal arrays and eight command arrays;
+the one-array recursive path uses the same format semantics.
 
 The checked-in regression suite uses self-contained constructed vectors and
 does not require that sibling repository.
