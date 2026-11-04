@@ -94,6 +94,9 @@ internal fun decodeByteArray(
         if (workspace.owns(destination)) maxOf(workspaceStart, destinationStart + header.decodedSize) else workspaceStart
     when (header.encoding) {
         ByteEncoding.RAW -> source.copyInto(destination, destinationStart, payload, payloadEnd)
+        ByteEncoding.TANS -> decodeTans(
+            source, payload, payloadEnd, destination, destinationStart, destinationStart + header.decodedSize,
+        )
         ByteEncoding.HUFFMAN, ByteEncoding.HUFFMAN6 -> decodeHuffman(
             source, payload, payloadEnd, destination, destinationStart, destinationStart + header.decodedSize,
             sixStreams = header.encoding == ByteEncoding.HUFFMAN6,
@@ -106,7 +109,6 @@ internal fun decodeByteArray(
             source, payload, payloadEnd, destination, destinationStart, destinationStart + header.decodedSize,
             workspace, nestedWorkspaceStart, depth,
         )
-        else -> throw UnsupportedOperationException("Byte-array encoding ${header.encoding} is not supported yet")
     }
     return header
 }

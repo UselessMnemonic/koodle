@@ -102,7 +102,7 @@ private class HuffmanTable(symbols: IntArray, lengths: IntArray) {
     }
 }
 
-/** Sparse legacy tables for both Huffman byte-array layouts. Other table formats are deferred. */
+/** Portable Huffman decoder for both table formats and both byte-array stream layouts. */
 internal fun decodeHuffman(
     source: ByteArray, start: Int, end: Int,
     output: ByteArray, outputStart: Int, outputEnd: Int, sixStreams: Boolean,

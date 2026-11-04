@@ -32,6 +32,22 @@ internal fun checkByteArrays() {
             bytes((kind shl 4) or (n ushr 14)) + be(((n.toLong() and 0x3fff) shl 18) or payload.size.toLong(), 4) + payload
         }
     }
+    fun legacyTans(): ByteArray {
+        // L=256, two symbols of weight 128, followed by fifteen zero state/bitstream bytes.
+        val table = pack(
+            "0" + "00" + "0" + "000" + "1000" +
+                binary(65, 8) + binary(128, 8) + binary(66, 8),
+        )
+        return encoded(table + ByteArray(15), 85, kind = 1)
+    }
+    fun newTans(): ByteArray {
+        // The same weights and symbols using Golomb-Rice weights plus an initial symbol gap.
+        val table = pack(
+            "0" + "00" + "1" + "111" + binary(1, 8) + "01" +
+                "11" + "000001" + binary(2, 6) + "1111111" + "1111111",
+        )
+        return encoded(table + ByteArray(15), 85, kind = 1)
+    }
     fun verify(input: ByteArray, expected: ByteArray) {
         val output = ByteArray(expected.size + 4) { 99 }
         val source = bytes(77) + input + bytes(88)
@@ -79,10 +95,10 @@ internal fun checkByteArrays() {
     malformed(encoded(bytes(0, 0xff), 14), 14) // output overshoot
     malformed(raw(bytes(1, 2)), 1) // caller capacity
     malformed(encoded(bytes(1, 2), 2), 2) // no compression in long header
-    for (kind in listOf(1)) {
-        val input = encoded(bytes(42), 31, kind)
-        rejectsArray<UnsupportedOperationException> { decodeByteArray(input, 0, input.size, ByteArray(31), 0, 31) }
-    }
+    val tansExpected = ByteArray(80) { 65 } + ByteArray(5)
+    verify(legacyTans(), tansExpected)
+    verify(newTans(), tansExpected)
+    malformed(encoded(bytes(0x80) + ByteArray(7), 31, kind = 1), 31) // reserved header bit
     val malformedPacked = encoded(encoded(bytes(42), 20), 50)
     rejectsArray<DecompressionException> {
         decodeByteArray(malformedPacked, 0, malformedPacked.size, ByteArray(50), 0, 50)
@@ -179,18 +195,14 @@ internal fun checkByteArrays() {
     rejectsArray<DecompressionException> {
         decodeByteArray(recursiveTrailing, 0, recursiveTrailing.size, ByteArray(40), 0, 40)
     }
-    val recursiveUnsupported = recursive(listOf(encoded(bytes(1), 40, kind = 1)), 40)
-    rejectsArray<UnsupportedOperationException> {
-        decodeByteArray(recursiveUnsupported, 0, recursiveUnsupported.size, ByteArray(40), 0, 40)
-    }
+    val recursiveTans = recursive(listOf(legacyTans()), 85)
+    verify(recursiveTans, tansExpected)
+    val recursiveNewTans = recursive(listOf(newTans()), 85)
+    verify(recursiveNewTans, tansExpected)
     val tooLargeNested = encoded(bytes(7), 0x40000)
     val workspaceOverflow = encoded(tooLargeNested + bytes(0), 0x40000)
     rejectsArray<DecompressionException> {
         decodeByteArray(workspaceOverflow, 0, workspaceOverflow.size, ByteArray(0x40000), 0, 0x40000)
-    }
-    val unsupportedNested = encoded(encoded(bytes(1), 100, kind = 1) + bytes(0xff), 100)
-    rejectsArray<UnsupportedOperationException> {
-        decodeByteArray(unsupportedNested, 0, unsupportedNested.size, ByteArray(100), 0, 100)
     }
     rejectsArray<IllegalArgumentException> { readByteArrayHeader(bytes(0, 0), -1, 2, 0) }
 
@@ -200,6 +212,8 @@ internal fun checkByteArrays() {
     val expected = ByteArray(0x20000) { (it % 251).toByte() } + ByteArray(19) { 42 }
     for (kind in listOf(6, 10, 12)) {
         check(decompress(framed(arrays, kind), expected.size).contentEquals(expected))
+        check(decompress(framed(legacyTans(), kind), tansExpected.size).contentEquals(tansExpected))
+        check(decompress(framed(newTans(), kind), tansExpected.size).contentEquals(tansExpected))
         check(decompress(framed(packedFill(2), kind), packedExpected.size).contentEquals(packedExpected))
         check(decompress(framed(sequential, kind), 100)
             .contentEquals(ByteArray(40) { 7 } + ByteArray(60) { 42 }))

@@ -8,11 +8,11 @@ path also supports raw chunks and raw/RLE byte arrays under Kraken,
 Mermaid/Selkie, and Leviathan framing. Both sparse and dense legacy Huffman
 tables are supported for the three-stream and six-stream byte-array layouts,
 including single-symbol fills. Newer Golomb-Rice Huffman tables and their compact
-symbol-range maps are also supported. Recursive arrays cover both sequential
-concatenation and entropy-array interleaving. These are partial codec paths;
-tANS and LZ chunk commands remain unsupported. Packed RLE command buffers may
-use raw, RLE, recursive, or either supported Huffman encoding. Checksummed
-blocks are explicitly rejected.
+symbol-range maps are also supported. tANS arrays support both legacy and newer
+Golomb-Rice table representations. Recursive arrays cover both sequential
+concatenation and entropy-array interleaving. These are partial codec paths; LZ
+chunk commands remain unsupported. Packed RLE command buffers may use any
+supported byte-array encoding. Checksummed blocks are explicitly rejected.
 
 ## Build
 
@@ -83,8 +83,8 @@ Nested decoders use nonoverlapping arena regions, and inputs exceeding the fixed
 workspace fail before writing. Sequential recursion is limited to 64 nested
 levels so malformed inputs cannot exhaust the call stack. Interleaved recursive
 arrays decode as many as 63 entropy sources, then rebuild their output from
-bounded index, interval-width, and dual-ended variable-bit streams. tANS remains
-explicitly deferred.
+bounded index, interval-width, and dual-ended variable-bit streams. The tANS
+decoder uses a bounded scalar lookup table and two-ended bit cursors.
 
 The Huffman decoder uses a portable scalar canonical-code table and bounds-checked
 bit readers. It supports sparse symbol lists and dense alternating symbol runs,
@@ -128,7 +128,9 @@ failure state. Packed-RLE checks cover nested raw, RLE, Huffman, and Huffman6
 arrays plus workspace exhaustion. Recursive checks cover one/two child arrays,
 nested concatenation, direct and interleaved multi-arrays, separate and combined
 interval metadata, malformed streams, use inside packed RLE, exact input/output
-accounting, unsupported children, and the depth limit. `check`
+accounting, and the depth limit. tANS checks cover legacy and Golomb-Rice table
+construction, symbol ranges, its five interleaved states, recursive nesting,
+truncation, and all three shared large-quantum framings. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
@@ -179,6 +181,12 @@ New Huffman behavior follows `huff_read_code_lengths_new`,
 bounds-checked scalar bit parsing. Constructed checks cover all forced-bit widths,
 initial and internal symbol gaps, one and 256-symbol alphabets, and both output
 stream layouts.
+
+tANS behavior follows `decode_tans`, both branches of
+`TansDecoder::decode_table`, and `TansDecoder::init_lut`. State transitions use
+portable bounded cursors over the forward and backward bitstreams. New table
+metadata reuses the same bounded Golomb-Rice and symbol-range semantics as the
+Huffman implementation.
 
 Packed RLE behavior follows the scratch-buffer branch of `decode_rle`: a leading
 byte array is decoded into bounded workspace, remaining command bytes are
