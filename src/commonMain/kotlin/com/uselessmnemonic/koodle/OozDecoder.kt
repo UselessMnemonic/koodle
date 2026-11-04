@@ -11,9 +11,10 @@ import com.uselessmnemonic.koodle.internal.entropy.EntropyWorkspace
  * Decodes Oodle block framing with an exact [outputSize] supplied by its enclosing container.
  * Supports LZB16, raw blocks, fills, whole matches, and uncompressed small quanta.
  * Large quanta support every byte-array entropy encoding and the traditional
- * Kraken and Mermaid/Selkie LZ command paths. Scaled Kraken offsets, Leviathan
- * commands, and checksums throw [UnsupportedOperationException]. Codec and
- * byte-array decoding are separate from framing.
+ * Kraken and Mermaid/Selkie LZ command paths plus Leviathan modes 0 and 1.
+ * Scaled Kraken offsets, Leviathan multi-array modes, and checksums throw
+ * [UnsupportedOperationException]. Codec and byte-array decoding are separate
+ * from framing.
  *
  * Input and output can be supplied in bounded chunks, even for sizes exceeding array limits.
  * Working memory is bounded by [historyCapacity] (default 64 KiB, minimum 64 KiB)

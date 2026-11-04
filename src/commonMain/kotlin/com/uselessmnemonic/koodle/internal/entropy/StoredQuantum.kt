@@ -3,6 +3,7 @@ package com.uselessmnemonic.koodle.internal.entropy
 import com.uselessmnemonic.koodle.DecompressionException
 import com.uselessmnemonic.koodle.internal.DecodeHistory
 import com.uselessmnemonic.koodle.internal.codec.decodeKrakenChunk
+import com.uselessmnemonic.koodle.internal.codec.decodeLeviathanChunk
 import com.uselessmnemonic.koodle.internal.codec.decodeMermaidChunk
 
 /** Shared 128 KiB framing plus dispatch to algorithm-specific LZ command processors. */
@@ -35,6 +36,9 @@ internal fun decodeStoredQuantum(
                         input, source, source + size, output, destination, count, mode, workspace, history,
                     )
                     10 -> decodeMermaidChunk(
+                        input, source, source + size, output, destination, count, mode, workspace, history,
+                    )
+                    12 -> decodeLeviathanChunk(
                         input, source, source + size, output, destination, count, mode, workspace, history,
                     )
                     else -> throw UnsupportedOperationException(

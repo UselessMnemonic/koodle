@@ -13,9 +13,11 @@ Golomb-Rice table representations. Recursive arrays cover both sequential
 concatenation and entropy-array interleaving. Kraken LZ chunks support ordinary
 and delta literals, recent and traditional explicit offsets, and extended
 lengths. Scaled Kraken offsets and excess-byte streams remain unsupported.
-Mermaid/Selkie LZ chunks support near and far offsets, long
-commands, delta literals, and split 64 KiB command streams. Leviathan LZ
-commands remain unsupported. Packed RLE command buffers may use any supported
+Mermaid/Selkie LZ chunks support near and far offsets, long commands, delta
+literals, and split 64 KiB command streams. Leviathan modes 0 and 1 support raw
+or subtractive literals, recent offsets, traditional and scaled packed offsets,
+and extended lengths. Its multi-array literal/command modes and recursive packed
+offset streams remain deferred. Packed RLE command buffers may use any supported
 byte-array encoding. Checksummed blocks are explicitly rejected.
 
 ## Build
@@ -138,7 +140,9 @@ construction, symbol ranges, its five interleaved states, recursive nesting,
 truncation, and all three shared large-quantum framings. Kraken checks cover
 ordinary/delta literals, recent/explicit offsets, overlapping matches, and both
 inline and variable-bit extended lengths. Mermaid checks cover ordinary/delta
-literals, near/far offsets, long commands, and the 64 KiB command split. `check`
+literals, near/far offsets, long commands, and the 64 KiB command split.
+Leviathan checks cover modes 0/1, recent/traditional/scaled offsets, and extended
+literal lengths. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
@@ -175,13 +179,16 @@ The shared byte-array layer follows `decode_bytes`, `decode_rle`, and
 the raw and byte-array branches of `decode_quantum`. Kraken command processing
 follows `KrakenLzTable`, including the traditional two-ended offset/length bit
 stream and forward-expanding match copies. Scaled offsets, excess-byte streams,
-and the Leviathan command processor remain deferred. Mermaid/Selkie processing
+remain deferred. Mermaid/Selkie processing
 follows `MermaidLzTable`, including raw or entropy-coded near offsets, far
-offsets, long lengths, and its two 64 KiB command partitions. Tests for these
-paths include constructed command vectors. All Kraken, Mermaid, and Selkie files
+offsets, long lengths, and its two 64 KiB command partitions. Leviathan modes 0
+and 1 follow `LeviathanLzTable` and its shared two-ended offset/length unpacker;
+multi-array modes and recursive packed-offset streams remain deferred. Tests for
+these paths include constructed command vectors. All Kraken, Mermaid, and Selkie files
 in the inspected local corpus—including Kraken restart and cross-block history
 fixtures—decoded byte-for-byte to their reference outputs. Leviathan remains
-covered only at its shared framing and entropy-array boundary.
+partial: the NCI fixture matches its reference output, while multi-array modes
+and recursive packed-offset streams are rejected explicitly.
 
 Legacy Huffman behavior follows `decode_bytes_type12`,
 `huff_read_code_lengths_old`, and the scalar semantics of `HuffReader`. During

@@ -239,6 +239,20 @@ internal fun checkByteArrays() {
             farOffsets.fold(ByteArray(0)) { bytes, offset -> bytes + little(offset, 3) } + lengths
         return be(0x800000L or (mode.toLong() shl 19) or payload.size.toLong(), 3) + payload
     }
+    fun leviathanChunk(
+        mode: Int,
+        literals: ByteArray,
+        commands: ByteArray = raw(ByteArray(0)),
+        offsets: ByteArray = raw(ByteArray(0)),
+        lengths: ByteArray = raw(ByteArray(0)),
+        variableBits: ByteArray = bytes(0x80),
+        offsetScale: Int? = null,
+    ): ByteArray {
+        val prefix = ByteArray(8) { (it + 1).toByte() }
+        val scale = offsetScale?.let { bytes(it + 127) } ?: ByteArray(0)
+        val payload = prefix + scale + offsets + lengths + literals + commands + variableBits
+        return be(0x800000L or (mode.toLong() shl 19) or payload.size.toLong(), 3) + payload
+    }
     // Short array headers are internal-only here: large chunk dispatch uses bit 23.
     val arrays = raw(ByteArray(0x20000) { (it % 251).toByte() }) + encoded(bytes(42), 19)
     val expected = ByteArray(0x20000) { (it % 251).toByte() } + ByteArray(19) { 42 }
@@ -275,7 +289,8 @@ internal fun checkByteArrays() {
     rejectsArray<DecompressionException> { decompress(framed(raw(plain) + bytes(99), 6), 5) }
     rejectsArray<DecompressionException> { decompress(framed(be(0x800001, 3) + bytes(0), 6), 5) }
     rejectsArray<DecompressionException> { decompress(framed(be(0x800001, 3) + bytes(0), 10), 5) }
-    rejectsArray<UnsupportedOperationException> { decompress(framed(be(0x800001, 3) + bytes(0), 12), 5) }
+    rejectsArray<DecompressionException> { decompress(framed(be(0x800001, 3) + bytes(0), 12), 5) }
+    rejectsArray<UnsupportedOperationException> { decompress(framed(be(0x900001, 3) + bytes(0), 12), 5) }
     val krakenPrefix = ByteArray(8) { (it + 1).toByte() }
     val krakenLiterals = krakenPrefix + ByteArray(92) { 42 }
     check(decompress(framed(krakenChunk(1, encoded(bytes(42), 92)), 6), 100)
@@ -384,6 +399,44 @@ internal fun checkByteArrays() {
         framed(mermaidChunk(1, encoded(bytes(42), 69_992), outputSize = 70_000), 10),
         70_000,
     ).contentEquals(splitMermaidExpected))
+    check(decompress(framed(leviathanChunk(1, encoded(bytes(42), 92)), 12), 100)
+        .contentEquals(krakenLiterals))
+    check(decompress(framed(leviathanChunk(0, encoded(bytes(1), 92)), 12), 100)
+        .contentEquals(deltaExpected))
+    check(decompress(
+        framed(leviathanChunk(1, encoded(bytes(42), 88), commands = raw(bytes(2))), 12),
+        100,
+    ).contentEquals(recentExpected))
+    check(decompress(
+        framed(
+            leviathanChunk(
+                1, encoded(bytes(42), 88), commands = raw(bytes(0xe2)),
+                offsets = raw(bytes(0)), variableBits = bytes(0, 0x80),
+            ),
+            12,
+        ),
+        100,
+    ).contentEquals(recentExpected))
+    check(decompress(
+        framed(
+            leviathanChunk(
+                1, encoded(bytes(42), 88), commands = raw(bytes(0xe2)),
+                offsets = raw(bytes(8)), variableBits = bytes(0, 0x80), offsetScale = 1,
+            ),
+            12,
+        ),
+        100,
+    ).contentEquals(recentExpected))
+    check(decompress(
+        framed(
+            leviathanChunk(
+                1, encoded(bytes(42), 88), commands = raw(bytes(0x1a)),
+                lengths = raw(bytes(2)),
+            ),
+            12,
+        ),
+        100,
+    ).contentEquals(longLiteralExpected))
     val full = framed(encoded(bytes(0xab), 0x20000) + encoded(bytes(0xcd), 0x20000), 6)
     check(decompress(full, 0x40000).contentEquals(ByteArray(0x20000) { 0xab.toByte() } + ByteArray(0x20000) { 0xcd.toByte() }))
     for (cut in full.indices) rejectsArray<DecompressionException> { decompress(full.copyOf(cut), 0x40000) }
