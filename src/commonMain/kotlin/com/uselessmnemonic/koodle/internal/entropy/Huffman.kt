@@ -36,6 +36,15 @@ private class HeaderBits(private val source: ByteArray, private val start: Int, 
         val value = (zeros shl forcedBits) or read(forcedBits)
         return if (value and 1 == 0) value ushr 1 else -(value ushr 1) - 1
     }
+
+    fun readFluff(symbolCount: Int): Int {
+        if (symbolCount == 256) return 0
+        val choices = 2 * minOf(257 - symbolCount, symbolCount)
+        val width = 32 - (choices - 1).countLeadingZeroBits()
+        val cutoff = (1 shl width) - choices
+        val prefix = read(width - 1)
+        return if (prefix < cutoff) prefix else ((prefix shl 1) or read(1)) - cutoff
+    }
 }
 
 /** Payload bits are LSB-first within bytes; the second stream visits bytes backwards. */
@@ -99,14 +108,37 @@ internal fun decodeHuffman(
     output: ByteArray, outputStart: Int, outputEnd: Int, sixStreams: Boolean,
 ) {
     val bits = HeaderBits(source, start, end)
-    if (bits.read(1) != 0) {
-        if (bits.read(1) != 0) throw DecompressionException("Reserved Huffman table format")
-        throw UnsupportedOperationException("New Huffman tables are not supported yet")
-    }
-    val dense = bits.read(1) != 0
+    val newFormat = bits.read(1) != 0
+    if (newFormat && bits.read(1) != 0) throw DecompressionException("Reserved Huffman table format")
     val symbols: IntArray
     val lengths: IntArray
-    if (dense) {
+    if (newFormat) {
+        val forcedBits = bits.read(2)
+        val count = bits.read(8) + 1
+        val fluff = bits.readFluff(count)
+        val rice = IntArray(count + fluff)
+        for (index in rice.indices) {
+            var quotient = 0
+            while (bits.read(1) == 0) {
+                if (++quotient > 255) throw DecompressionException("Golomb-Rice value is too large")
+            }
+            rice[index] = quotient
+        }
+        if (forcedBits > 0) {
+            for (index in 0 until count) rice[index] = (rice[index] shl forcedBits) or bits.read(forcedBits)
+        }
+        lengths = IntArray(count)
+        var runningSum = 30
+        repeat(count) { index ->
+            val value = rice[index]
+            val delta = if (value and 1 == 0) value ushr 1 else -(value ushr 1) - 1
+            val length = delta + (runningSum ushr 2) + 1
+            if (length !in 1..11) throw DecompressionException("Invalid Huffman code length")
+            lengths[index] = length
+            runningSum += delta
+        }
+        symbols = decodeSymbolRanges(bits, count, fluff, rice)
+    } else if (bits.read(1) != 0) {
         val forcedBits = bits.read(2)
         var symbol = 0
         var averageTimesFour = 32
@@ -158,6 +190,10 @@ internal fun decodeHuffman(
             lengths[i] = bits.read(lengthBits) + 1
         }
     }
+    if (symbols.size == 1) {
+        output.fill(symbols[0].toByte(), outputStart, outputEnd)
+        return
+    }
     val table = HuffmanTable(symbols, lengths)
     val payload = bits.nextByte
     if (!sixStreams) {
@@ -172,6 +208,37 @@ internal fun decodeHuffman(
         decodeThreeStreams(source, left, left + leftSize, output, outputStart, middle, table)
         decodeThreeStreams(source, left + leftSize, end, output, middle, outputEnd, table)
     }
+}
+
+private fun decodeSymbolRanges(bits: HeaderBits, count: Int, fluff: Int, rice: IntArray): IntArray {
+    var extra = count
+    var symbol = 0
+    if (fluff and 1 != 0) {
+        val width = rice[extra++]
+        if (width >= 8) throw DecompressionException("Invalid Huffman initial-space width")
+        symbol = bits.read(width + 1) + (1 shl (width + 1)) - 1
+    }
+    var used = 0
+    val result = IntArray(count)
+    repeat(fluff ushr 1) {
+        val lengthWidth = rice[extra++]
+        if (lengthWidth >= 9) throw DecompressionException("Invalid Huffman range-length width")
+        val length = bits.read(lengthWidth) + (1 shl lengthWidth)
+        val spaceWidth = rice[extra++]
+        if (spaceWidth >= 8) throw DecompressionException("Invalid Huffman range-space width")
+        val space = bits.read(spaceWidth + 1) + (1 shl (spaceWidth + 1)) - 1
+        if (length > count - used || symbol > 256 - length) {
+            throw DecompressionException("Invalid Huffman symbol range")
+        }
+        repeat(length) { result[used++] = symbol++ }
+        symbol += space
+    }
+    val remaining = count - used
+    if (remaining <= 0 || symbol > 256 - remaining) {
+        throw DecompressionException("Invalid final Huffman symbol range")
+    }
+    repeat(remaining) { result[used++] = symbol++ }
+    return result
 }
 
 private fun decodeThreeStreams(

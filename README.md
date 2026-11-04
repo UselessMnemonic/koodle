@@ -7,9 +7,9 @@ quanta, whole-match quanta, and uncompressed small quanta. The shared large-quan
 path also supports raw chunks and raw/RLE byte arrays under Kraken,
 Mermaid/Selkie, and Leviathan framing. Both sparse and dense legacy Huffman
 tables are supported for the three-stream and six-stream byte-array layouts,
-including single-symbol fills. These are partial codec paths; newer Golomb-Rice
-Huffman tables, tANS, recursive arrays, packed RLE commands, and LZ chunk
-commands remain unsupported.
+including single-symbol fills. Newer Golomb-Rice Huffman tables and their compact
+symbol-range maps are also supported. These are partial codec paths; tANS,
+recursive arrays, packed RLE commands, and LZ chunk commands remain unsupported.
 Checksummed blocks are explicitly rejected.
 
 ## Build
@@ -82,9 +82,11 @@ bit readers. It supports sparse symbol lists and dense alternating symbol runs,
 including gamma-coded run lengths and adaptive code-length deltas with all four
 forced-bit widths. Code lengths through 11 bits are supported. It validates
 complete tables, duplicate symbols, run bounds, stream splits, and stream
-consumption. The scalar implementation is the correctness baseline;
-platform-specific acceleration can be considered after the remaining table
-format is ported and benchmarked.
+consumption. The newer format decodes unary Golomb-Rice quotients, separated
+remainder bits, adaptive length residuals, truncated-binary metadata, and compact
+symbol ranges with the same bounded cursor. The scalar implementation is the
+correctness baseline; platform-specific acceleration can be considered after
+the remaining entropy codecs are ported and benchmarked.
 
 Whole-match distances may exceed LZB16's 16-bit window. `OozDecoder`,
 `decompress`, and `decompressInto` accept `historyCapacity` in bytes
@@ -112,7 +114,8 @@ array ranges, trailing input, truncated and invalid headers, unsupported feature
 LZB16 command forms, overlap expansion, history wraparound/restarts, whole-match
 distance encodings, overflow, capacity limits, byte-array header variants, RLE
 command forms, legacy sparse/dense Huffman tables and stream layouts, 128 KiB
-chunk boundaries, and decoder failure state. `check`
+chunk boundaries, Golomb-Rice tables, sparse symbol-range maps, and decoder
+failure state. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
@@ -156,6 +159,13 @@ this port, the local `single-symbol-huffman.kraken` fixture decoded all 100 byte
 and matched its reference output. Multi-symbol checks use constructed canonical
 tables because no matching standalone fixture was present in the inspected test
 data.
+
+New Huffman behavior follows `huff_read_code_lengths_new`,
+`decode_golomb_rice_lengths`, `decode_golomb_rice_bits`, and
+`convert_to_ranges`. The port expresses their optimized table operations as
+bounds-checked scalar bit parsing. Constructed checks cover all forced-bit widths,
+initial and internal symbol gaps, one and 256-symbol alphabets, and both output
+stream layouts.
 
 The checked-in regression suite uses self-contained constructed vectors and
 does not require that sibling repository.

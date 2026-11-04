@@ -1,6 +1,7 @@
 package com.uselessmnemonic.koodle
 
 import com.uselessmnemonic.koodle.internal.entropy.decodeByteArray
+import com.uselessmnemonic.koodle.internal.entropy.decodeHuffman
 
 private inline fun <reified T : Throwable> rejectsHuffman(block: () -> Unit) {
     try { block() } catch (error: Throwable) {
@@ -81,6 +82,72 @@ internal fun checkHuffman() {
         }
         return pack(bits)
     }
+    fun fluff(value: Int, symbolCount: Int): String {
+        if (symbolCount == 256) return ""
+        val choices = 2 * minOf(257 - symbolCount, symbolCount)
+        val width = 32 - (choices - 1).countLeadingZeroBits()
+        val cutoff = (1 shl width) - choices
+        return if (value < cutoff) binary(value, width - 1) else binary(value + cutoff, width)
+    }
+    fun newTable(lengths: Map<Int, Int>, forcedBits: Int = 0): ByteArray {
+        require(lengths.isNotEmpty() && forcedBits in 0..3)
+        val symbols = lengths.keys.toList().sorted()
+        val ranges = mutableListOf<IntRange>()
+        var rangeStart = symbols.first()
+        var previous = rangeStart
+        for (symbol in symbols.drop(1)) {
+            if (symbol != previous + 1) {
+                ranges += rangeStart..previous
+                rangeStart = symbol
+            }
+            previous = symbol
+        }
+        ranges += rangeStart..previous
+        val metadata = mutableListOf<Int>()
+        val hasInitialSpace = ranges.first().first != 0
+        if (hasInitialSpace) {
+            val space = ranges.first().first
+            metadata += (30 - (space + 1).countLeadingZeroBits()).coerceAtLeast(0)
+        }
+        for (index in 0 until ranges.lastIndex) {
+            val length = ranges[index].last - ranges[index].first + 1
+            metadata += 31 - length.countLeadingZeroBits()
+            val space = ranges[index + 1].first - ranges[index].last - 1
+            metadata += (30 - (space + 1).countLeadingZeroBits()).coerceAtLeast(0)
+        }
+        val fluffValue = metadata.size
+        var bits = "10" + binary(forcedBits, 2) + binary(symbols.size - 1, 8) + fluff(fluffValue, symbols.size)
+        var runningSum = 30
+        val values = mutableListOf<Int>()
+        for (symbol in symbols) {
+            val target = lengths.getValue(symbol)
+            val delta = target - (runningSum ushr 2) - 1
+            values += if (delta >= 0) delta * 2 else -delta * 2 - 1
+            runningSum += delta
+        }
+        values += metadata
+        for ((index, value) in values.withIndex()) {
+            val quotient = if (index < symbols.size) value ushr forcedBits else value
+            bits += "0".repeat(quotient) + "1"
+        }
+        if (forcedBits > 0) for (value in values.take(symbols.size)) {
+            bits += binary(value and ((1 shl forcedBits) - 1), forcedBits)
+        }
+        var metadataIndex = 0
+        if (hasInitialSpace) {
+            val width = metadata[metadataIndex++] + 1
+            bits += binary(ranges.first().first - (1 shl width) + 1, width)
+        }
+        for (index in 0 until ranges.lastIndex) {
+            val lengthWidth = metadata[metadataIndex++]
+            val length = ranges[index].last - ranges[index].first + 1
+            if (lengthWidth > 0) bits += binary(length - (1 shl lengthWidth), lengthWidth)
+            val spaceWidth = metadata[metadataIndex++] + 1
+            val space = ranges[index + 1].first - ranges[index].last - 1
+            bits += binary(space - (1 shl spaceWidth) + 1, spaceWidth)
+        }
+        return pack(bits)
+    }
     fun streams(values: List<Int>, codes: Map<Int, String>): ByteArray {
         val parts = (0..2).map { stream ->
             pack(values.filterIndexed { i, _ -> i % 3 == stream }.joinToString("") { codes.getValue(it) }, lsb = true)
@@ -132,12 +199,34 @@ internal fun checkHuffman() {
             for (forced in 0..3) {
                 check(decode(denseTable(lengthMap, forced) + data, denseValues.size, six)
                     .contentEquals(denseValues.map { it.toByte() }.toByteArray()))
+                val modern = newTable(lengthMap, forced) + data
+                try {
+                    check(decode(modern, denseValues.size, six)
+                        .contentEquals(denseValues.map { it.toByte() }.toByteArray()))
+                } catch (error: Throwable) {
+                    error("New Huffman vector failed: six=$six forced=$forced symbols=${lengthMap.keys} bytes=${modern.size}: $error")
+                }
             }
         }
+        val allSymbols = (0..255).associateWith { 8 }
+        val allValues = List(513) { (it * 193) and 255 }
+        val allCodes = allSymbols.keys.associateWith { binary(it, 8) }
+        val allData = if (!six) streams(allValues, allCodes) else {
+            val half = (allValues.size + 1) / 2
+            val left = streams(allValues.take(half), allCodes)
+            bytes(left.size and 255, (left.size ushr 8) and 255, left.size ushr 16) +
+                left + streams(allValues.drop(half), allCodes)
+        }
+        val allPayload = newTable(allSymbols) + allData
+        val allOutput = ByteArray(allValues.size)
+        decodeHuffman(allPayload, 0, allPayload.size, allOutput, 0, allOutput.size, six)
+        check(allOutput.contentEquals(allValues.map { it.toByte() }.toByteArray()))
+        check(decode(newTable(mapOf(42 to 8)) + bytes(0), 91, six)
+            .contentEquals(ByteArray(91) { 42 }))
     }
     rejectsHuffman<DecompressionException> { decode(pack("0000000000"), 100) } // empty alphabet
     rejectsHuffman<DecompressionException> { decode(bytes(0xc0, 0), 100) } // reserved format
-    rejectsHuffman<UnsupportedOperationException> { decode(bytes(0x80, 0), 100) } // new table
+    rejectsHuffman<DecompressionException> { decode(bytes(0x80, 0), 100) } // truncated new table
     rejectsHuffman<DecompressionException> { decode(bytes(0x40, 0), 100) } // truncated dense table
     rejectsHuffman<DecompressionException> { decode(table(listOf(7, 7), listOf("0", "1")), 100) }
     rejectsHuffman<DecompressionException> { decode(table(listOf(1, 2), listOf("00", "01")), 100) }
