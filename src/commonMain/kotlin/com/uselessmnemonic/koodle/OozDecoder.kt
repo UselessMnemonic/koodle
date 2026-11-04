@@ -10,9 +10,10 @@ import com.uselessmnemonic.koodle.internal.entropy.EntropyWorkspace
 /**
  * Decodes Oodle block framing with an exact [outputSize] supplied by its enclosing container.
  * Supports LZB16, raw blocks, fills, whole matches, and uncompressed small quanta.
- * Large quanta support raw chunks and raw/RLE byte arrays, but not entropy-coded
- * arrays or LZ command streams. Unsupported paths and checksums throw
- * [UnsupportedOperationException]. Codec and byte-array decoding are separate from framing.
+ * Large quanta support every byte-array entropy encoding and the traditional
+ * Kraken LZ command path. Scaled Kraken offsets, Mermaid/Leviathan commands,
+ * and checksums throw [UnsupportedOperationException]. Codec and byte-array
+ * decoding are separate from framing.
  *
  * Input and output can be supplied in bounded chunks, even for sizes exceeding array limits.
  * Working memory is bounded by [historyCapacity] (default 64 KiB, minimum 64 KiB)
@@ -110,7 +111,10 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
                         if (decoderType == 2) {
                             decodeLzb16(payload, current.size, buffer, quantumRemaining, history)
                         } else {
-                            decodeStoredQuantum(payload, current.size, buffer, quantumRemaining, entropyWorkspace)
+                            decodeStoredQuantum(
+                                payload, current.size, buffer, quantumRemaining, decoderType,
+                                entropyWorkspace, history,
+                            )
                             history.append(buffer, 0, quantumRemaining)
                         }
                         quantumDecoded = true

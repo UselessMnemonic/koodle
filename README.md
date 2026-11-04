@@ -4,15 +4,17 @@ A Kotlin Multiplatform starting point for a port of
 [oozextract](https://github.com/lvlvllvlvllvlvl/oozextract), under
 `com.uselessmnemonic.koodle`. Supports LZB16 compressed quanta, raw blocks, fill
 quanta, whole-match quanta, and uncompressed small quanta. The shared large-quantum
-path also supports raw chunks and raw/RLE byte arrays under Kraken,
+path also supports raw chunks and all byte-array entropy encodings under Kraken,
 Mermaid/Selkie, and Leviathan framing. Both sparse and dense legacy Huffman
 tables are supported for the three-stream and six-stream byte-array layouts,
 including single-symbol fills. Newer Golomb-Rice Huffman tables and their compact
 symbol-range maps are also supported. tANS arrays support both legacy and newer
 Golomb-Rice table representations. Recursive arrays cover both sequential
-concatenation and entropy-array interleaving. These are partial codec paths; LZ
-chunk commands remain unsupported. Packed RLE command buffers may use any
-supported byte-array encoding. Checksummed blocks are explicitly rejected.
+concatenation and entropy-array interleaving. Kraken LZ chunks support ordinary
+and delta literals, recent and traditional explicit offsets, and extended
+lengths. Scaled Kraken offsets and Mermaid/Leviathan LZ commands remain
+unsupported. Packed RLE command buffers may use any supported byte-array
+encoding. Checksummed blocks are explicitly rejected.
 
 ## Build
 
@@ -130,7 +132,9 @@ nested concatenation, direct and interleaved multi-arrays, separate and combined
 interval metadata, malformed streams, use inside packed RLE, exact input/output
 accounting, and the depth limit. tANS checks cover legacy and Golomb-Rice table
 construction, symbol ranges, its five interleaved states, recursive nesting,
-truncation, and all three shared large-quantum framings. `check`
+truncation, and all three shared large-quantum framings. Kraken checks cover
+ordinary/delta literals, recent/explicit offsets, overlapping matches, and both
+inline and variable-bit extended lengths. `check`
 also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
@@ -164,9 +168,14 @@ were available in the Rust tests inspected.
 
 The shared byte-array layer follows `decode_bytes`, `decode_rle`, and
 `decode_rle_unpacked` in `src/decoder/mod.rs`. The large-quantum adapter follows
-the raw and byte-array branches of `decode_quantum`; it does not yet implement
-algorithm-specific LZ command processing. Tests for these new paths use
-constructed vectors, not full compressed Kraken/Mermaid/Leviathan fixtures.
+the raw and byte-array branches of `decode_quantum`. Kraken command processing
+follows `KrakenLzTable`, including the traditional two-ended offset/length bit
+stream and forward-expanding match copies. Scaled offsets, excess-byte streams,
+and the Mermaid/Leviathan command processors remain deferred. Tests for these
+paths include constructed command vectors. All Kraken files in the inspected
+local corpus—including restart and cross-block history fixtures—also decoded
+byte-for-byte to their reference outputs. Mermaid and Leviathan remain covered
+only at their shared framing and entropy-array boundary.
 
 Legacy Huffman behavior follows `decode_bytes_type12`,
 `huff_read_code_lengths_old`, and the scalar semantics of `HuffReader`. During

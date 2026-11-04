@@ -1,13 +1,13 @@
 package com.uselessmnemonic.koodle.internal.entropy
 
 import com.uselessmnemonic.koodle.DecompressionException
+import com.uselessmnemonic.koodle.internal.DecodeHistory
+import com.uselessmnemonic.koodle.internal.codec.decodeKrakenChunk
 
-/** Shared 128 KiB chunk framing for Kraken, Mermaid/Selkie, and Leviathan.
- * Only raw and supported byte-array paths are implemented, not LZ commands.
- */
+/** Shared 128 KiB framing plus dispatch to algorithm-specific LZ command processors. */
 internal fun decodeStoredQuantum(
     input: ByteArray, inputSize: Int, output: ByteArray, outputSize: Int,
-    workspace: EntropyWorkspace,
+    decoderType: Int, workspace: EntropyWorkspace, history: DecodeHistory,
 ) {
     var source = 0
     var destination = 0
@@ -28,9 +28,17 @@ internal fun decodeStoredQuantum(
             val mode = (bits ushr 19) and 15
             if (size > inputSize - source) throw DecompressionException("Truncated chunk payload")
             if (size > count) throw DecompressionException("Chunk payload exceeds output size")
-            if (size < count) throw UnsupportedOperationException("LZ chunk commands are not supported yet")
-            if (mode != 0) throw DecompressionException("Invalid raw chunk mode")
-            input.copyInto(output, destination, source, source + size)
+            if (size < count) {
+                if (decoderType != 6) {
+                    throw UnsupportedOperationException("LZ commands for decoder $decoderType are not supported yet")
+                }
+                decodeKrakenChunk(
+                    input, source, source + size, output, destination, count, mode, workspace, history,
+                )
+            } else {
+                if (mode != 0) throw DecompressionException("Invalid raw chunk mode")
+                input.copyInto(output, destination, source, source + size)
+            }
             source += size
         }
         destination += count

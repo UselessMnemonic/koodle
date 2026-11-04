@@ -207,6 +207,18 @@ internal fun checkByteArrays() {
     rejectsArray<IllegalArgumentException> { readByteArrayHeader(bytes(0, 0), -1, 2, 0) }
 
     fun framed(payload: ByteArray, kind: Int): ByteArray = bytes(0x8c, kind) + be((payload.size - 1).toLong(), 3) + payload
+    fun krakenChunk(
+        mode: Int,
+        literals: ByteArray,
+        commands: ByteArray = raw(ByteArray(0)),
+        offsets: ByteArray = raw(ByteArray(0)),
+        lengths: ByteArray = raw(ByteArray(0)),
+        variableBits: ByteArray = bytes(0x80),
+    ): ByteArray {
+        val prefix = ByteArray(8) { (it + 1).toByte() }
+        val payload = prefix + literals + commands + offsets + lengths + variableBits
+        return be(0x800000L or (mode.toLong() shl 19) or payload.size.toLong(), 3) + payload
+    }
     // Short array headers are internal-only here: large chunk dispatch uses bit 23.
     val arrays = raw(ByteArray(0x20000) { (it % 251).toByte() }) + encoded(bytes(42), 19)
     val expected = ByteArray(0x20000) { (it % 251).toByte() } + ByteArray(19) { 42 }
@@ -241,7 +253,75 @@ internal fun checkByteArrays() {
     rejectsArray<DecompressionException> { decompress(framed(be(0x880005, 3) + plain, 6), 5) }
     rejectsArray<DecompressionException> { decompress(framed(raw(plain), 6), 6) }
     rejectsArray<DecompressionException> { decompress(framed(raw(plain) + bytes(99), 6), 5) }
-    rejectsArray<UnsupportedOperationException> { decompress(framed(be(0x800001, 3) + bytes(0), 6), 5) }
+    rejectsArray<DecompressionException> { decompress(framed(be(0x800001, 3) + bytes(0), 6), 5) }
+    rejectsArray<UnsupportedOperationException> { decompress(framed(be(0x800001, 3) + bytes(0), 10), 5) }
+    val krakenPrefix = ByteArray(8) { (it + 1).toByte() }
+    val krakenLiterals = krakenPrefix + ByteArray(92) { 42 }
+    check(decompress(framed(krakenChunk(1, encoded(bytes(42), 92)), 6), 100)
+        .contentEquals(krakenLiterals))
+    val recentExpected = krakenPrefix + krakenPrefix.copyOfRange(0, 4) + ByteArray(88) { 42 }
+    check(decompress(
+        framed(krakenChunk(1, encoded(bytes(42), 88), commands = raw(bytes(8))), 6), 100,
+    ).contentEquals(recentExpected))
+    check(decompress(
+        framed(
+            krakenChunk(
+                1, encoded(bytes(42), 88), commands = raw(bytes(0xc8)),
+                offsets = raw(bytes(0)), variableBits = bytes(0, 0x80),
+            ),
+            6,
+        ),
+        100,
+    ).contentEquals(recentExpected))
+    val longLiteralExpected = krakenPrefix + ByteArray(5) { 42 } + bytes(6, 7, 8, 42) +
+        ByteArray(83) { 42 }
+    check(decompress(
+        framed(
+            krakenChunk(
+                1, encoded(bytes(42), 88), commands = raw(bytes(11)),
+                lengths = raw(bytes(2)),
+            ),
+            6,
+        ),
+        100,
+    ).contentEquals(longLiteralExpected))
+    val escapedLengthExpected = krakenPrefix + ByteArray(292) { 42 }
+    check(decompress(
+        framed(
+            krakenChunk(
+                1, encoded(bytes(42), 288), commands = raw(bytes(11)),
+                lengths = raw(bytes(255)), variableBits = bytes(0x80, 0x40),
+            ),
+            6,
+        ),
+        300,
+    ).contentEquals(escapedLengthExpected))
+    val deltaExpected = ByteArray(100)
+    krakenPrefix.copyInto(deltaExpected)
+    for (index in 8 until deltaExpected.size) deltaExpected[index] = (deltaExpected[index - 8] + 1).toByte()
+    check(decompress(framed(krakenChunk(0, encoded(bytes(1), 92)), 6), 100)
+        .contentEquals(deltaExpected))
+    val firstKrakenChunkOutput = ByteArray(0x20000) { it.toByte() }
+    val firstKrakenChunk = be(0x820000, 3) + firstKrakenChunkOutput
+    val continuedPayload = encoded(bytes(1), 100) + raw(ByteArray(0)) +
+        raw(ByteArray(0)) + raw(ByteArray(0)) + bytes(0x80)
+    val continuedChunk = be(0x800000L or continuedPayload.size.toLong(), 3) + continuedPayload
+    val continuedExpected = firstKrakenChunkOutput + ByteArray(100)
+    for (index in firstKrakenChunkOutput.size until continuedExpected.size) {
+        continuedExpected[index] = (continuedExpected[index - 8] + 1).toByte()
+    }
+    check(decompress(framed(firstKrakenChunk + continuedChunk, 6), continuedExpected.size)
+        .contentEquals(continuedExpected))
+    val priorBlock = ByteArray(0x40000) { it.toByte() }
+    val historyChunk = be(0x800000L or continuedPayload.size.toLong(), 3) + continuedPayload
+    val historyStream = bytes(0x4c, 6) + priorBlock + bytes(0x0c, 6) +
+        be((historyChunk.size - 1).toLong(), 3) + historyChunk
+    val historyExpected = priorBlock + ByteArray(100)
+    for (index in priorBlock.size until historyExpected.size) {
+        historyExpected[index] = (historyExpected[index - 8] + 1).toByte()
+    }
+    check(decompress(historyStream, historyExpected.size, historyCapacity = historyExpected.size)
+        .contentEquals(historyExpected))
     val full = framed(encoded(bytes(0xab), 0x20000) + encoded(bytes(0xcd), 0x20000), 6)
     check(decompress(full, 0x40000).contentEquals(ByteArray(0x20000) { 0xab.toByte() } + ByteArray(0x20000) { 0xcd.toByte() }))
     for (cut in full.indices) rejectsArray<DecompressionException> { decompress(full.copyOf(cut), 0x40000) }
