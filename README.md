@@ -125,6 +125,8 @@ Full project API guidelines are recorded in [AGENTS.md](AGENTS.md).
 ./gradlew decoderChecks compileKotlinLinuxArm64 compileKotlinMacosArm64
 # On an ARM64 Mac with full Xcode installed and selected:
 ./gradlew runDecoderChecksDebugExecutableMacosArm64
+# Optional: verify incrementally against an external oozextract checkout:
+./gradlew referenceChecks -PreferenceRoot=/path/to/oozextract
 ```
 
 The same dependency-free regression checks run on JVM and macOS ARM64. They cover

@@ -35,6 +35,21 @@ val jvmChecks = tasks.register<JavaExec>("decoderChecks") {
     mainClass.set("com.uselessmnemonic.koodle.DecoderChecksKt")
 }
 
+val referenceChecks = tasks.register<JavaExec>("referenceChecks") {
+    group = "verification"
+    description = "Checks an external oozextract corpus; pass -PreferenceRoot=/path/to/oozextract."
+    val compilation = kotlin.targets.getByName("jvm").compilations.getByName("test")
+    val referenceRoot = providers.gradleProperty("referenceRoot")
+    dependsOn(compilation.compileTaskProvider)
+    classpath(compilation.output.allOutputs, compilation.runtimeDependencyFiles)
+    mainClass.set("com.uselessmnemonic.koodle.ReferenceChecksKt")
+    doFirst {
+        args(referenceRoot.orNull ?: throw GradleException(
+            "Pass the oozextract repository path with -PreferenceRoot=/path/to/oozextract",
+        ))
+    }
+}
+
 // Checks are dependency-free executable tests rather than JUnit tests.
 tasks.named<Test>("jvmTest") { enabled = false }
 tasks.named("check") { dependsOn(jvmChecks) }
