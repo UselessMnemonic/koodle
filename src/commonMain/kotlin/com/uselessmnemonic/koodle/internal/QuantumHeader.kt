@@ -3,7 +3,7 @@ package com.uselessmnemonic.koodle.internal
 import com.uselessmnemonic.koodle.DecompressionException
 
 internal sealed interface QuantumHeader {
-    data class Compressed(val size: Int) : QuantumHeader
+    data class Compressed(val size: Int, val checksum: Int? = null) : QuantumHeader
     data class Fill(val value: Byte) : QuantumHeader
     data class WholeMatch(val distance: Long) : QuantumHeader
     data object Uncompressed : QuantumHeader
@@ -11,25 +11,29 @@ internal sealed interface QuantumHeader {
 
 /** Incremental big-endian quantum header parser; retains no payload bytes. */
 internal class QuantumHeaderParser {
-    private enum class State { HEADER, FILL, MATCH_HIGH, MATCH_LOW, MATCH_EXTENSION }
+    private enum class State { HEADER, CHECKSUM, FILL, MATCH_HIGH, MATCH_LOW, MATCH_EXTENSION }
     private var state = State.HEADER
     private var large = true
+    private var checksummed = false
     private var value = 0
     private var count = 0
+    private var compressedSize = 0
     private var extension = 0L
     private var shift = 0
 
-    fun reset(large: Boolean) {
+    fun reset(large: Boolean, checksummed: Boolean = false) {
         this.large = large
+        this.checksummed = checksummed
         state = State.HEADER
         value = 0
         count = 0
+        compressedSize = 0
         extension = 0
         shift = 0
     }
 
     private fun complete(header: QuantumHeader): QuantumHeader {
-        reset(large)
+        reset(large, checksummed)
         return header
     }
 
@@ -37,6 +41,11 @@ internal class QuantumHeaderParser {
     fun accept(byte: Byte): QuantumHeader? {
         val unsigned = byte.toInt() and 0xff
         when (state) {
+            State.CHECKSUM -> {
+                value = (value shl 8) or unsigned
+                if (++count < 3) return null
+                return complete(QuantumHeader.Compressed(compressedSize, value))
+            }
             State.FILL -> return complete(QuantumHeader.Fill(byte))
             State.MATCH_HIGH -> {
                 value = unsigned shl 8
@@ -67,7 +76,14 @@ internal class QuantumHeaderParser {
         if (++count < if (large) 3 else 2) return null
         val mask = if (large) 0x3ffff else 0x3fff
         val size = value and mask
-        if (size != mask) return complete(QuantumHeader.Compressed(size + 1))
+        if (size != mask) {
+            if (!checksummed) return complete(QuantumHeader.Compressed(size + 1))
+            compressedSize = size + 1
+            value = 0
+            count = 0
+            state = State.CHECKSUM
+            return null
+        }
         val kind = value ushr if (large) 18 else 14
         if (kind == 1) {
             state = State.FILL

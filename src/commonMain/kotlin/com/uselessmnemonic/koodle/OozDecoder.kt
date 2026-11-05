@@ -17,8 +17,9 @@ import com.uselessmnemonic.koodle.internal.entropy.EntropyWorkspace
  * Large quanta support every byte-array entropy encoding and the traditional
  * Kraken and Mermaid/Selkie LZ command paths plus all six Leviathan literal
  * modes, multi-array commands, recursive packed metadata, and Kraken excess-byte
- * streams. Checksums throw [UnsupportedOperationException]. Codec and byte-array decoding
- * are separate from framing.
+ * streams. Checksum fields are consumed but not verified because their algorithm is not
+ * available in the reference implementation. Codec and byte-array decoding are separate
+ * from framing.
  *
  * Input and output can be supplied in bounded chunks, even for sizes exceeding array limits.
  * Working memory is bounded by [historyCapacity] (default 64 KiB, minimum 64 KiB)
@@ -38,6 +39,7 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
     private var blockRemaining = 0
     private var quantumSize = 0
     private var quantumRemaining = 0
+    private var checksummed = false
     private var quantum: QuantumHeader? = null
     private val quantumParser = QuantumHeaderParser()
     private var decoderType = 0
@@ -165,9 +167,7 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
                         6, 10, 12 -> 0x40000
                         else -> throw DecompressionException("Unknown decoder type: ${second and 0x7f}")
                     }
-                    if (second and 0x80 != 0) {
-                        throw UnsupportedOperationException("Checksummed blocks are not supported yet")
-                    }
+                    checksummed = second and 0x80 != 0
                     // All decoder types receive a framing header every 256 KiB of output.
                     // Small codec quantum sizes do not introduce headers in raw blocks.
                     blockRemaining = minOf(remaining, 0x40000L).toInt()
@@ -176,7 +176,7 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
                         lznaState = null
                         bitknitState = null
                     }
-                    quantumParser.reset(large = quantumSize == 0x40000)
+                    quantumParser.reset(large = quantumSize == 0x40000, checksummed = checksummed)
                     if (firstHeaderByte and 0x40 != 0) {
                         quantum = QuantumHeader.Uncompressed
                         quantumRemaining = blockRemaining

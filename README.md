@@ -20,7 +20,8 @@ subtractive, laminated, striped, and order-1 literal streams, single or
 multi-array commands, recent offsets, traditional and scaled packed offsets, and
 extended lengths. Packed offsets and lengths may use recursive byte-array
 representations. Packed RLE command buffers may use any supported byte-array
-encoding. Checksummed blocks are explicitly rejected.
+encoding. Checksummed block framing is supported, but the stored checksums are not
+verified because the checksum algorithm is absent from the reference implementation.
 
 ## Build
 

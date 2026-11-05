@@ -20,6 +20,14 @@ public fun main() {
     val lzna = byteArrayOf(0x8c.toByte(), 5, 0, 5, 1, 0, 0, 0, 0, 0)
     check(decompress(lzna, 9).contentEquals(ByteArray(9)))
     for (cut in lzna.indices) fails<DecompressionException> { decompress(lzna.copyOf(cut), 9) }
+    val checksummedLzna = byteArrayOf(
+        0x8c.toByte(), 0x85.toByte(), 0, 5, 0x12, 0x34, 0x56,
+        1, 0, 0, 0, 0, 0,
+    )
+    check(decompress(checksummedLzna, 9).contentEquals(ByteArray(9)))
+    for (cut in checksummedLzna.indices) {
+        fails<DecompressionException> { decompress(checksummedLzna.copyOf(cut), 9) }
+    }
     // One bootstrap byte followed by the two little-endian terminal coder states.
     val bitknit = byteArrayOf(0x8c.toByte(), 11, 0, 7, 0, 0, 0x10, 0, 0, 0, 0, 0)
     check(decompress(bitknit, 5).contentEquals(ByteArray(5)))
@@ -65,7 +73,7 @@ public fun main() {
     fails<DecompressionException> { decompress(byteArrayOf(0x4c, 3), 1) }
     fails<DecompressionException> { decompress(byteArrayOf(0x8c.toByte(), 6), 1) }
     fails<DecompressionException> { decompress(byteArrayOf(0x8c.toByte(), 6, 0, 0, 0), 1) }
-    fails<UnsupportedOperationException> { decompress(byteArrayOf(0x4c, 0x86.toByte()), 1) }
+    check(decompress(byteArrayOf(0x4c, 0x86.toByte(), 7), 1).contentEquals(byteArrayOf(7)))
     fails<IllegalArgumentException> { decompressInto(encoded, encoded) }
     fails<IllegalArgumentException> { decompressInto(encoded, ByteArray(3), 2, outputSize = Int.MAX_VALUE) }
     fails<IllegalArgumentException> { OozDecoder(-1) }
@@ -112,6 +120,8 @@ private fun checkQuanta() {
     for (kind in listOf(2, 5, 6, 10, 11, 12)) {
         val large = kind in listOf(6, 10, 12)
         val fill = bytes(0x8c, kind) + (if (large) bytes(7, 255, 255, 0xab) else bytes(127, 255, 0xab))
+        val checksummedFill = fill.copyOf().also { it[1] = (kind or 0x80).toByte() }
+        check(decompress(checksummedFill, 17).contentEquals(ByteArray(17) { 0xab.toByte() }))
         for (inputChunk in 1..fill.size) for (outputChunk in 1..9) {
             fragmented(fill, ByteArray(17) { 0xab.toByte() }, inputChunk, outputChunk)
         }
@@ -120,6 +130,8 @@ private fun checkQuanta() {
         }
     }
     val raw = bytes(0x8c, 2, 0xbf, 0xff, 1, 2, 3, 4, 5)
+    check(decompress(bytes(0x8c, 0x82, 0xbf, 0xff, 1, 2, 3, 4, 5), 5)
+        .contentEquals(bytes(1, 2, 3, 4, 5)))
     for (inputChunk in 1..raw.size) for (outputChunk in 1..6) {
         fragmented(raw, bytes(1, 2, 3, 4, 5), inputChunk, outputChunk)
     }
@@ -156,4 +168,13 @@ private fun checkQuanta() {
     parser.reset(large = false)
     check(parser.accept(0x40) == null)
     check(parser.accept(0) == com.uselessmnemonic.koodle.internal.QuantumHeader.Compressed(1))
+    parser.reset(large = true, checksummed = true)
+    check(parser.accept(0x04) == null)
+    check(parser.accept(0x12) == null)
+    check(parser.accept(0x34) == null)
+    check(parser.accept(0xab.toByte()) == null)
+    check(parser.accept(0xcd.toByte()) == null)
+    check(parser.accept(0xef.toByte()) == com.uselessmnemonic.koodle.internal.QuantumHeader.Compressed(
+        0x1235, 0xabcdef,
+    ))
 }

@@ -218,7 +218,10 @@ internal fun checkByteArrays() {
     }
     rejectsArray<IllegalArgumentException> { readByteArrayHeader(bytes(0, 0), -1, 2, 0) }
 
-    fun framed(payload: ByteArray, kind: Int): ByteArray = bytes(0x8c, kind) + be((payload.size - 1).toLong(), 3) + payload
+    fun framed(payload: ByteArray, kind: Int, checksum: Int? = null): ByteArray =
+        bytes(0x8c, kind or if (checksum == null) 0 else 0x80) +
+            be((payload.size - 1).toLong(), 3) +
+            (checksum?.let { be(it.toLong(), 3) } ?: ByteArray(0)) + payload
     fun krakenChunk(
         mode: Int,
         literals: ByteArray,
@@ -292,8 +295,11 @@ internal fun checkByteArrays() {
             .contentEquals(ByteArray(40) { 7 } + ByteArray(60) { 42 }))
         check(decompress(framed(interleaved(combined = false), kind), 70)
             .contentEquals(interleavedExpected))
-        val input = framed(encoded(bytes(71), 123), kind)
-        for (inputChunk in 1..input.size) for (outputChunk in listOf(1, 13, 123)) {
+        val inputs = listOf(
+            framed(encoded(bytes(71), 123), kind),
+            framed(encoded(bytes(71), 123), kind, checksum = 0x123456),
+        )
+        for (input in inputs) for (inputChunk in 1..input.size) for (outputChunk in listOf(1, 13, 123)) {
             val decoder = OozDecoder(123)
             var consumed = 0
             val actual = mutableListOf<Byte>()
@@ -322,6 +328,9 @@ internal fun checkByteArrays() {
     val krakenLiterals = krakenPrefix + ByteArray(92) { 42 }
     check(decompress(framed(krakenChunk(1, encoded(bytes(42), 92)), 6), 100)
         .contentEquals(krakenLiterals))
+    check(decompress(
+        framed(krakenChunk(1, encoded(bytes(42), 92)), 6, checksum = 0xabcdef), 100,
+    ).contentEquals(krakenLiterals))
     val recentExpected = krakenPrefix + krakenPrefix.copyOfRange(0, 4) + ByteArray(88) { 42 }
     check(decompress(
         framed(krakenChunk(1, encoded(bytes(42), 88), commands = raw(bytes(8))), 6), 100,
