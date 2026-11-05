@@ -13,7 +13,7 @@ symbol-range maps are also supported. tANS arrays support both legacy and newer
 Golomb-Rice table representations. Recursive arrays cover both sequential
 concatenation and entropy-array interleaving. Kraken LZ chunks support ordinary
 and delta literals, recent, traditional, and scaled explicit offsets, and
-extended lengths. Excess-byte streams remain unsupported.
+extended lengths, including detached excess-byte streams.
 Mermaid/Selkie LZ chunks support near and far offsets, long commands, delta
 literals, and split 64 KiB command streams. All six Leviathan modes support raw,
 subtractive, laminated, striped, and order-1 literal streams, single or

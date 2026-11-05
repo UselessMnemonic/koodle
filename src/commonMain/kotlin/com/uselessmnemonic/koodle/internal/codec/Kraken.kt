@@ -31,10 +31,23 @@ internal fun decodeKrakenChunk(
         destination += 8
     }
     if (source >= end) throw DecompressionException("Missing Kraken literal stream")
+    var mainEnd = end
+    var detachedLengthBits: DetachedLengthBits? = null
     if (input[source].toInt() and 0x80 != 0) {
-        throw UnsupportedOperationException("Kraken excess-byte streams are not supported yet")
+        val flag = input[source++].toInt() and 255
+        if (flag and 0xc0 != 0x80) throw DecompressionException("Invalid Kraken excess-byte flag")
+        var excessSize = flag and 0x3f
+        if (excessSize > 0x1f) {
+            if (source >= end) throw DecompressionException("Truncated Kraken excess-byte size")
+            excessSize += (input[source++].toInt() and 255) * 0x20
+        }
+        mainEnd -= excessSize
+        if (mainEnd < source) throw DecompressionException("Kraken excess-byte stream exceeds its chunk")
+        detachedLengthBits = DetachedLengthBits(mainEnd, end)
     }
-    val streams = readKrakenStreams(input, source, end, outputSize, workspace)
+    val streams = readKrakenStreams(
+        input, source, mainEnd, outputSize, workspace, detachedLengthBits,
+    )
     runKrakenCommands(
         output, destination, outputStart + outputSize, mode,
         workspace.bytes, streams, history,
@@ -43,6 +56,7 @@ internal fun decodeKrakenChunk(
 
 private fun readKrakenStreams(
     input: ByteArray, start: Int, end: Int, outputSize: Int, workspace: EntropyWorkspace,
+    detachedLengthBits: DetachedLengthBits?,
 ): KrakenStreams {
     var source = start
     var scratch = 0
@@ -84,6 +98,7 @@ private fun readKrakenStreams(
         offsetLowBitsStart, offsetScale,
         packedLengthsStart, packedLengthsSize,
         input, source, end, "Kraken",
+        detachedLengthBits,
     )
     return KrakenStreams(
         literalsStart, literalsSize, commandsStart, commandsSize,

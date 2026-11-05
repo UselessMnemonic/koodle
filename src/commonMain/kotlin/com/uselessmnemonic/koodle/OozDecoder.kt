@@ -16,9 +16,9 @@ import com.uselessmnemonic.koodle.internal.entropy.EntropyWorkspace
  * Supports LZB16, LZNA, Bitknit, raw blocks, fills, whole matches, and uncompressed small quanta.
  * Large quanta support every byte-array entropy encoding and the traditional
  * Kraken and Mermaid/Selkie LZ command paths plus all six Leviathan literal
- * modes, multi-array commands, and recursive packed metadata. Kraken excess-byte
- * streams and checksums throw [UnsupportedOperationException]. Codec and byte-array
- * decoding are separate from framing.
+ * modes, multi-array commands, recursive packed metadata, and Kraken excess-byte
+ * streams. Checksums throw [UnsupportedOperationException]. Codec and byte-array decoding
+ * are separate from framing.
  *
  * Input and output can be supplied in bounded chunks, even for sizes exceeding array limits.
  * Working memory is bounded by [historyCapacity] (default 64 KiB, minimum 64 KiB)

@@ -1,5 +1,7 @@
 package com.uselessmnemonic.koodle
 
+import com.uselessmnemonic.koodle.internal.codec.DetachedLengthBits
+import com.uselessmnemonic.koodle.internal.codec.unpackOffsets
 import com.uselessmnemonic.koodle.internal.entropy.decodeByteArray
 import com.uselessmnemonic.koodle.internal.entropy.readByteArrayHeader
 
@@ -226,11 +228,20 @@ internal fun checkByteArrays() {
         variableBits: ByteArray = bytes(0x80),
         offsetScale: Int? = null,
         offsetLowBits: ByteArray = ByteArray(0),
+        excessLengthBits: ByteArray? = null,
     ): ByteArray {
         val prefix = ByteArray(8) { (it + 1).toByte() }
         val scale = offsetScale?.let { bytes(it + 127) } ?: ByteArray(0)
-        val payload = prefix + literals + commands + scale + offsets + offsetLowBits +
-            lengths + variableBits
+        val excessHeader = excessLengthBits?.let {
+            if (it.size <= 0x1f) {
+                bytes(0x80 or it.size)
+            } else {
+                val base = 0x20 or (it.size and 0x1f)
+                bytes(0x80 or base, (it.size - base) / 0x20)
+            }
+        } ?: ByteArray(0)
+        val payload = prefix + excessHeader + literals + commands + scale + offsets +
+            offsetLowBits + lengths + variableBits + (excessLengthBits ?: ByteArray(0))
         return be(0x800000L or (mode.toLong() shl 19) or payload.size.toLong(), 3) + payload
     }
     fun mermaidChunk(
@@ -407,6 +418,47 @@ internal fun checkByteArrays() {
         ),
         300,
     ).contentEquals(escapedLengthExpected))
+    val detachedLengthExpected = krakenPrefix + ByteArray(262) { 42 }
+    for (excessSize in listOf(1, 32)) {
+        val excess = ByteArray(excessSize)
+        excess[0] = 0x80.toByte()
+        check(decompress(
+            framed(
+                krakenChunk(
+                    1, encoded(bytes(42), 258), commands = raw(bytes(11)),
+                    lengths = raw(bytes(255)), variableBits = ByteArray(0),
+                    excessLengthBits = excess,
+                ),
+                6,
+            ),
+            270,
+        ).contentEquals(detachedLengthExpected))
+    }
+    val alternatingDetachedLengths = unpackOffsets(
+        bytes(255, 255), 0, 0, -1, 0, 0, 2,
+        bytes(0x80, 0x80), 0, 0, "Kraken", DetachedLengthBits(0, 2),
+    )
+    check(alternatingDetachedLengths.lengths.contentEquals(intArrayOf(258, 258)))
+    rejectsArray<DecompressionException> {
+        unpackOffsets(
+            bytes(255), 0, 0, -1, 0, 0, 1,
+            ByteArray(0), 0, 0, "Kraken", DetachedLengthBits(0, 0),
+        )
+    }
+    val invalidExcessFlag = krakenChunk(
+        1, encoded(bytes(42), 258), commands = raw(bytes(11)),
+        lengths = raw(bytes(255)), variableBits = ByteArray(0),
+        excessLengthBits = bytes(0x80),
+    )
+    invalidExcessFlag[11] = 0xc0.toByte()
+    rejectsArray<DecompressionException> {
+        decompress(framed(invalidExcessFlag, 6), 270)
+    }
+    val oversizedExcess = krakenChunk(1, encoded(bytes(42), 92))
+    oversizedExcess[11] = 0xbf.toByte()
+    rejectsArray<DecompressionException> {
+        decompress(framed(oversizedExcess, 6), 100)
+    }
     check(decompress(framed(krakenChunk(0, encoded(bytes(1), 92)), 6), 100)
         .contentEquals(deltaExpected))
     val firstKrakenChunkOutput = ByteArray(0x20000) { it.toByte() }

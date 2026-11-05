@@ -93,6 +93,9 @@ internal fun Int.expandPackedLength(extension: Int = 0): Int = this + extension 
 
 internal data class UnpackedMetadata(val offsets: IntArray, val lengths: IntArray)
 
+/** A detached two-ended stream containing only packed-length extensions. */
+internal data class DetachedLengthBits(val start: Int, val end: Int)
+
 /** Scalar equivalent of the reference implementation's `unpack_offsets`. */
 internal fun unpackOffsets(
     packed: ByteArray,
@@ -106,9 +109,18 @@ internal fun unpackOffsets(
     variableBitsStart: Int,
     variableBitsEnd: Int,
     formatName: String,
+    detachedLengthBits: DetachedLengthBits? = null,
 ): UnpackedMetadata {
     val bits = TwoEndedBitReader(variableBits, variableBitsStart, variableBitsEnd, formatName)
-    val extendedLengthCount = bits.readBackwardLengthCount()
+    val extendedLengthCount = if (detachedLengthBits == null) {
+        bits.readBackwardLengthCount()
+    } else {
+        var count = 0
+        repeat(lengthsSize) { index ->
+            if (packed[lengthsStart + index].toInt() and 255 == 255) count++
+        }
+        count
+    }
     if (extendedLengthCount > 512) {
         throw DecompressionException("Too many $formatName extended lengths")
     }
@@ -126,8 +138,11 @@ internal fun unpackOffsets(
             )
         }
     }
+    val lengthBits = detachedLengthBits?.let {
+        TwoEndedBitReader(variableBits, it.start, it.end, "$formatName excess-length")
+    } ?: bits
     val extended = IntArray(extendedLengthCount) { index ->
-        bits.readLength(if (index and 1 == 0) BitstreamEnd.FORWARD else BitstreamEnd.BACKWARD)
+        lengthBits.readLength(if (index and 1 == 0) BitstreamEnd.FORWARD else BitstreamEnd.BACKWARD)
     }
     val lengths = IntArray(lengthsSize)
     var extensionIndex = 0
@@ -144,6 +159,7 @@ internal fun unpackOffsets(
     if (extensionIndex != extended.size) {
         throw DecompressionException("Unused $formatName extended lengths")
     }
-    bits.requireConsumed()
+    // The encoded excess form permits padding on both the main and detached seams.
+    if (detachedLengthBits == null) bits.requireConsumed()
     return UnpackedMetadata(offsets, lengths)
 }
