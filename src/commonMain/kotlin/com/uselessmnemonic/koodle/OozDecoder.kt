@@ -3,7 +3,9 @@ package com.uselessmnemonic.koodle
 import com.uselessmnemonic.koodle.internal.QuantumHeader
 import com.uselessmnemonic.koodle.internal.QuantumHeaderParser
 import com.uselessmnemonic.koodle.internal.DecodeHistory
+import com.uselessmnemonic.koodle.internal.codec.BitknitState
 import com.uselessmnemonic.koodle.internal.codec.LznaState
+import com.uselessmnemonic.koodle.internal.codec.decodeBitknitQuantum
 import com.uselessmnemonic.koodle.internal.codec.decodeLzb16
 import com.uselessmnemonic.koodle.internal.codec.decodeLznaQuantum
 import com.uselessmnemonic.koodle.internal.entropy.decodeStoredQuantum
@@ -11,7 +13,7 @@ import com.uselessmnemonic.koodle.internal.entropy.EntropyWorkspace
 
 /**
  * Decodes Oodle block framing with an exact [outputSize] supplied by its enclosing container.
- * Supports LZB16, LZNA, raw blocks, fills, whole matches, and uncompressed small quanta.
+ * Supports LZB16, LZNA, Bitknit, raw blocks, fills, whole matches, and uncompressed small quanta.
  * Large quanta support every byte-array entropy encoding and the traditional
  * Kraken and Mermaid/Selkie LZ command paths plus all six Leviathan literal
  * modes, multi-array commands, and recursive packed metadata. Kraken excess-byte
@@ -20,7 +22,7 @@ import com.uselessmnemonic.koodle.internal.entropy.EntropyWorkspace
  *
  * Input and output can be supplied in bounded chunks, even for sizes exceeding array limits.
  * Working memory is bounded by [historyCapacity] (default 64 KiB, minimum 64 KiB)
- * plus two lazy quantum buffers (16 KiB each for LZB16/LZNA, up to 256 KiB each
+ * plus two lazy quantum buffers (16 KiB each for small codecs, up to 256 KiB each
  * for large quanta) and up to two lazy 256 KiB entropy arenas. Whole matches may reference output before
  * a codec restart. Distances beyond retained history throw [UnsupportedOperationException];
  * select a larger capacity before decoding if required by the input.
@@ -48,6 +50,7 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
     private val entropyWorkspace = EntropyWorkspace()
     private val codecScratchWorkspace = EntropyWorkspace()
     private var lznaState: LznaState? = null
+    private var bitknitState: BitknitState? = null
     private var failed = false
 
     private fun advanceOutput(count: Int) {
@@ -121,6 +124,12 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
                                 payload, current.size, buffer, quantumRemaining, state, history,
                             )
                             history.append(buffer, 0, quantumRemaining)
+                        } else if (decoderType == 11) {
+                            val state = bitknitState ?: BitknitState().also { bitknitState = it }
+                            decodeBitknitQuantum(
+                                payload, current.size, buffer, quantumRemaining, state, history,
+                            )
+                            history.append(buffer, 0, quantumRemaining)
                         } else {
                             decodeStoredQuantum(
                                 payload, current.size, buffer, quantumRemaining, decoderType,
@@ -165,6 +174,7 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
                     if (firstHeaderByte and 0x80 != 0) {
                         history.restartCodec()
                         lznaState = null
+                        bitknitState = null
                     }
                     quantumParser.reset(large = quantumSize == 0x40000)
                     if (firstHeaderByte and 0x40 != 0) {
@@ -177,7 +187,7 @@ public class OozDecoder(outputSize: Long, historyCapacity: Int = 0x10000) : Deco
                     when (header) {
                         is QuantumHeader.Compressed -> {
                             if (decoderType != 2 && decoderType != 5 && decoderType != 6 &&
-                                decoderType != 10 && decoderType != 12
+                                decoderType != 10 && decoderType != 11 && decoderType != 12
                             ) throw UnsupportedOperationException(
                                 "Compressed payloads for decoder $decoderType are not supported yet",
                             )

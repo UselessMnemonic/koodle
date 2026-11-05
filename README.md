@@ -2,10 +2,11 @@
 
 A Kotlin Multiplatform starting point for a port of
 [oozextract](https://github.com/lvlvllvlvllvlvl/oozextract), under
-`com.uselessmnemonic.koodle`. Supports LZB16 and stateful LZNA compressed quanta,
-raw blocks, fill quanta, whole-match quanta, and uncompressed small quanta. The
-shared large-quantum path also supports raw chunks and all byte-array entropy encodings under Kraken,
-Mermaid/Selkie, and Leviathan framing. Both sparse and dense legacy Huffman
+`com.uselessmnemonic.koodle`. Supports LZB16 plus stateful LZNA and Bitknit
+compressed quanta, raw blocks, fill quanta, whole-match quanta, and uncompressed
+small quanta. The shared large-quantum path also supports raw chunks and all
+byte-array entropy encodings under Kraken, Mermaid/Selkie, and Leviathan framing.
+Both sparse and dense legacy Huffman
 tables are supported for the three-stream and six-stream byte-array layouts,
 including single-symbol fills. Newer Golomb-Rice Huffman tables and their compact
 symbol-range maps are also supported. tANS arrays support both legacy and newer
@@ -145,8 +146,9 @@ ordinary/delta literals, near/far offsets, long commands, and the 64 KiB command
 Leviathan checks cover all six literal modes, single/eight-way command streams,
 recent/traditional/scaled offsets, recursive packed metadata, and extended
 literal lengths. LZNA checks cover its initial literal and terminal rANS-state
-layout; the local corpus exercises persistent models, match forms, and restarts. `check`
-also runs the JVM checks. No JUnit or other test dependencies are required.
+layout. Bitknit checks cover its bootstrap and terminal coder states. The local
+corpus exercises both codecs' persistent models, match forms, and restarts.
+`check` also runs the JVM checks. No JUnit or other test dependencies are required.
 Native executable linking requires full Xcode; standalone Command Line Tools
 can compile the library but are insufficient for this native check executable.
 
@@ -170,7 +172,9 @@ reference: `parse_header`, `parse_quantum_header`, `parse_whole_match`,
 `src/algorithm/lzb16.rs` with a bounded history ring in place of whole-output
 indexing. LZNA follows `src/algorithm/lzna.rs`, retaining its adaptive probability
 models across 16 KiB quanta and writing the two terminal rANS states into each
-quantum's final eight bytes. During this port, the local
+quantum's final eight bytes. Bitknit follows `src/algorithm/bitknit.rs`, retaining
+its cumulative-frequency models and recent-distance permutation across 16 KiB
+quanta, with two terminal 16-bit coder states. During this port, the local
 `lzb16-mixed` (300,000 bytes) and `lzb16-short` (777 bytes) fixtures were decoded
 and compared byte-for-byte against the Rust repository's `verify` files.
 Whole matches expand forward on overlap, consistent with
@@ -200,6 +204,10 @@ All 12 LZNA files in the inspected local corpus decoded byte-for-byte to their
 reference outputs. LZNA uses absolute stream positions for model contexts and
 match references even when a restart replaces its adaptive model; retained match
 bytes remain bounded by `historyCapacity`.
+
+All 12 Bitknit files in the same corpus also decoded byte-for-byte to their
+reference outputs. Its arithmetic uses explicit unsigned 16/32-bit semantics;
+match copies use the same bounded absolute-stream history as LZNA.
 
 Legacy Huffman behavior follows `decode_bytes_type12`,
 `huff_read_code_lengths_old`, and the scalar semantics of `HuffReader`. During

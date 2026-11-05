@@ -20,6 +20,10 @@ public fun main() {
     val lzna = byteArrayOf(0x8c.toByte(), 5, 0, 5, 1, 0, 0, 0, 0, 0)
     check(decompress(lzna, 9).contentEquals(ByteArray(9)))
     for (cut in lzna.indices) fails<DecompressionException> { decompress(lzna.copyOf(cut), 9) }
+    // One bootstrap byte followed by the two little-endian terminal coder states.
+    val bitknit = byteArrayOf(0x8c.toByte(), 11, 0, 7, 0, 0, 0x10, 0, 0, 0, 0, 0)
+    check(decompress(bitknit, 5).contentEquals(ByteArray(5)))
+    for (cut in bitknit.indices) fails<DecompressionException> { decompress(bitknit.copyOf(cut), 5) }
     // Every small input/output chunk combination, including a header split across calls.
     for (inputChunk in 1..encoded.size) for (outputChunk in 1..6) {
         val decoder: Decoder = OozDecoder(5)
